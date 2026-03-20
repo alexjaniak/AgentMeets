@@ -1,17 +1,35 @@
 import { Hono } from "hono";
 import { createDatabase } from "./db/index.js";
+import { RoomManager, createWebSocketHandlers, handleUpgrade } from "./ws/index.js";
+import type { WsData } from "./ws/index.js";
 
-const db = createDatabase();
+export function createServer(port = 3000) {
+  const db = createDatabase();
+  const app = new Hono();
+  const roomManager = new RoomManager(db);
+  const wsHandlers = createWebSocketHandlers(roomManager);
 
-const app = new Hono();
+  app.get("/health", (c) => c.json({ status: "ok" }));
 
-app.get("/health", (c) => {
-  return c.json({ status: "ok" });
-});
+  const server = Bun.serve<WsData>({
+    port,
+    fetch(req, server) {
+      const upgradeResponse = handleUpgrade(req, server, db, roomManager);
+      if (upgradeResponse) return upgradeResponse;
 
-export { db };
+      const url = new URL(req.url);
+      if (url.pathname.match(/^\/rooms\/[^/]+\/ws$/)) {
+        return undefined as unknown as Response;
+      }
 
-export default {
-  port: Number(process.env.PORT) || 3000,
-  fetch: app.fetch,
-};
+      return app.fetch(req);
+    },
+    websocket: wsHandlers,
+  });
+
+  return { server, app, roomManager, db };
+}
+
+const port = Number(process.env.PORT) || 3000;
+const { server } = createServer(port);
+console.log(`AgentMeets server listening on port ${server.port}`);
