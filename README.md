@@ -111,9 +111,7 @@ bun test                               # Run tests
 
 Create a new ephemeral room and connect to it.
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `timeout` | number | No | Seconds to wait for guest to join (default: 300) |
+No parameters.
 
 Returns `{ roomId, status: "waiting" }`.
 
