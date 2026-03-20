@@ -3,4 +3,3 @@ dist/
 *.db
 *.tsbuildinfo
 .agent.lock
-bun.lock
