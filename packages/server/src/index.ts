@@ -5,7 +5,7 @@ import type { WsData } from "./ws/index.js";
 import { roomRoutes } from "./routes/rooms.js";
 
 export function createServer(port = 3000) {
-  const db = createDatabase();
+  const db = createDatabase(process.env.DATABASE_PATH);
   const app = new Hono();
   const roomManager = new RoomManager(db);
   const wsHandlers = createWebSocketHandlers(roomManager);

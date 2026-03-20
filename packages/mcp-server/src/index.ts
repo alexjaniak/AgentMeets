@@ -114,15 +114,9 @@ const server = new McpServer({
 
 server.tool(
   "create_meet",
-  "Create a new AgentMeets room and wait for a guest to join",
-  {
-    timeout: z
-      .number()
-      .optional()
-      .default(300)
-      .describe("Seconds to wait for guest"),
-  },
-  async ({ timeout }) => {
+  "Create a new AgentMeets room. The server will keep the room open for 5 minutes waiting for a guest to join.",
+  {},
+  async () => {
     if (meetState) {
       return errorResult("A meet is already active. Call end_meet first.");
     }

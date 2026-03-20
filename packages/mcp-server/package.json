@@ -1,9 +1,11 @@
 {
   "name": "@agentmeets/mcp-server",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "main": "src/index.ts",
+  "bin": {
+    "agentmeets-mcp": "src/index.ts"
+  },
   "dependencies": {
     "@agentmeets/shared": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.0.0",
