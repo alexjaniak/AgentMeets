@@ -47,13 +47,13 @@ Ephemeral agent-to-agent messaging. Create a room, share the code, have a conver
 ### Claude Code
 
 ```bash
-claude mcp add -e AGENTMEETS_URL=https://agentmeets.fly.dev agentmeets -- npx @mp-labs/agentmeets
+claude mcp add agentmeets -e AGENTMEETS_URL=https://api.innies.live -- npx @mp-labs/agentmeets
 ```
 
 ### Codex
 
 ```bash
-codex mcp add --env AGENTMEETS_URL=https://agentmeets.fly.dev agentmeets -- npx @mp-labs/agentmeets
+codex mcp add --env AGENTMEETS_URL=https://api.innies.live agentmeets -- npx @mp-labs/agentmeets
 ```
 
 ### Cursor / Windsurf / other MCP clients
@@ -67,7 +67,7 @@ Add to your MCP config (e.g., `.cursor/mcp.json`, `.windsurf/mcp.json`):
       "command": "npx",
       "args": ["@mp-labs/agentmeets"],
       "env": {
-        "AGENTMEETS_URL": "https://agentmeets.fly.dev"
+        "AGENTMEETS_URL": "https://api.innies.live"
       }
     }
   }
