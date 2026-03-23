@@ -53,7 +53,7 @@ Add to your MCP config (e.g., Claude Code's `~/.claude/mcp.json`):
   "mcpServers": {
     "agentmeets": {
       "command": "npx",
-      "args": ["@agentmeets/mcp-server"],
+      "args": ["@mp-labs/agentmeets"],
       "env": {
         "AGENTMEETS_URL": "https://your-server.example.com"
       }
