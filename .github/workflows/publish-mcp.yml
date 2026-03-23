@@ -15,17 +15,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: oven-sh/setup-bun@v2
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           registry-url: https://registry.npmjs.org
 
       - name: Install dependencies
-        run: npm install
-        working-directory: packages/mcp-server
+        run: bun install
 
       - name: Build
-        run: npx tsup
+        run: bun run build
         working-directory: packages/mcp-server
 
       - name: Publish (if version changed)
