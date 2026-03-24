@@ -124,11 +124,13 @@ export class RoomManager {
     closeRoom(this.db, roomId, "user_ended");
 
     const other = this.getOtherParticipant(roomId, senderRole);
+    const sender = this.getConnection(roomId, senderRole);
     if (other) {
       sendJson(other, { type: "ended", reason: "user_ended" });
     }
-
-    const sender = this.getConnection(roomId, senderRole);
+    if (sender) {
+      sendJson(sender, { type: "ended", reason: "user_ended" });
+    }
     this.cleanupRoom(roomId);
 
     if (other) {

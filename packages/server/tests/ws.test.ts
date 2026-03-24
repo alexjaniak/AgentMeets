@@ -287,9 +287,12 @@ describe("WebSocket relay — integration tests", () => {
     await waitForMessage(hostWs); // consume 'room_active'
     await waitForMessage(guestWs); // consume 'room_active'
 
+    const senderEndedPromise = waitForMessage(hostWs);
     const endedPromise = waitForMessage(guestWs);
     hostWs.send(JSON.stringify({ type: "end" }));
+    const senderMsg = await senderEndedPromise;
     const msg = await endedPromise;
+    expect(senderMsg).toEqual({ type: "ended", reason: "user_ended" });
     expect(msg).toEqual({ type: "ended", reason: "user_ended" });
 
     // Verify room was closed in DB
@@ -307,9 +310,12 @@ describe("WebSocket relay — integration tests", () => {
     await waitForMessage(hostWs); // consume 'room_active'
     await waitForMessage(guestWs); // consume 'room_active'
 
+    const senderEndedPromise = waitForMessage(guestWs);
     const endedPromise = waitForMessage(hostWs);
     guestWs.send(JSON.stringify({ type: "end" }));
+    const senderMsg = await senderEndedPromise;
     const msg = await endedPromise;
+    expect(senderMsg).toEqual({ type: "ended", reason: "user_ended" });
     expect(msg).toEqual({ type: "ended", reason: "user_ended" });
   });
 
