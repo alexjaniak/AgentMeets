@@ -242,19 +242,27 @@ describe("WebSocket relay — integration tests", () => {
     guestWs.close();
   });
 
-  test("invalid client payload returns error event", async () => {
+  test("missing replyToMessageId returns error event", async () => {
     const hostWs = connectAs("host-token-123");
     await waitForOpen(hostWs);
 
     const errorPromise = waitForMessage(hostWs);
-    hostWs.send(JSON.stringify({ type: "message", content: "missing id" }));
+    hostWs.send(
+      JSON.stringify({
+        type: "message",
+        clientMessageId: "missing-reply-id",
+        content: "missing replyToMessageId",
+      }),
+    );
 
     const msg = (await errorPromise) as Record<string, unknown>;
     expect(msg).toMatchObject({
       type: "error",
       code: "invalid_message",
     });
-    expect(typeof msg.message).toBe("string");
+    expect(msg.message).toBe(
+      "Invalid message: replyToMessageId must be present and be an integer or null",
+    );
 
     hostWs.close();
   });

@@ -58,12 +58,13 @@ function validateMessagePayload(msg: MessagePayload): string | null {
     return "Invalid message: clientMessageId must be a non-empty string";
   }
 
-  if (msg.replyToMessageId !== undefined && msg.replyToMessageId !== null) {
-    if (
-      typeof msg.replyToMessageId !== "number" ||
-      !Number.isInteger(msg.replyToMessageId)
-    ) {
-      return "Invalid message: replyToMessageId must be an integer or null";
+  if (!Object.hasOwn(msg, "replyToMessageId")) {
+    return "Invalid message: replyToMessageId must be present and be an integer or null";
+  }
+
+  if (msg.replyToMessageId !== null) {
+    if (typeof msg.replyToMessageId !== "number" || !Number.isInteger(msg.replyToMessageId)) {
+      return "Invalid message: replyToMessageId must be present and be an integer or null";
     }
   }
 

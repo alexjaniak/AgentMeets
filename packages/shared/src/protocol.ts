@@ -5,7 +5,7 @@ import type { CloseReason, Sender } from "./types.js";
 export interface MessagePayload {
   type: "message";
   clientMessageId: string;
-  replyToMessageId?: number | null;
+  replyToMessageId: number | null;
   content: string;
 }
 
