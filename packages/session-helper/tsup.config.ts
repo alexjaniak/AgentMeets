@@ -1,11 +1,11 @@
 import { defineConfig } from "tsup";
 
 export default defineConfig({
-  entry: [
-    "src/adapters/types.ts",
-    "src/adapters/detect-invite.ts",
-    "src/adapters/fake-session.ts",
-  ],
+  entry: {
+    "adapters/types": "src/adapters/types.ts",
+    "adapters/detect-invite": "src/adapters/detect-invite.ts",
+    "adapters/fake-session": "src/adapters/fake-session.ts",
+  },
   dts: true,
   format: "esm",
   target: "node18",
