@@ -1,8 +1,9 @@
-import { z } from "zod";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import * as z from "zod/v4";
 
 const DEFAULT_SESSION_HELPER_PACKAGE = "@mp-labs/agentmeets-session";
 
-export const createMeetInputSchema = {
+export const createMeetInputSchema = z.object({
   openingMessage: z
     .string()
     .describe("Required opening message to persist and replay to the guest"),
@@ -12,7 +13,7 @@ export const createMeetInputSchema = {
     .positive()
     .optional()
     .describe("Optional invite lifetime in seconds"),
-} satisfies Record<string, z.ZodTypeAny>;
+});
 
 export interface CreateMeetHandlerOptions {
   serverUrl: string;
@@ -32,10 +33,7 @@ interface CreateRoomResponse {
   inviteUrl: string;
 }
 
-interface ToolResult {
-  content: Array<{ type: "text"; text: string }>;
-  isError?: true;
-}
+type ToolResult = CallToolResult;
 
 export function createCreateMeetHandler({
   serverUrl,

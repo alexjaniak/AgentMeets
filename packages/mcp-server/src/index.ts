@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { z } from "zod";
+import type { AnySchema } from "@modelcontextprotocol/sdk/server/zod-compat.js";
+import * as z from "zod/v4";
 import { createEndPayload, createMeetState, createMessagePayload, processServerMessage } from "./client.js";
 import type { PendingReplyResult, MeetState } from "./client.js";
 import { createCreateMeetHandler, createMeetInputSchema } from "./tools/create-meet.js";
@@ -12,14 +13,18 @@ const env =
 const SERVER_URL =
   env.AGENTMEETS_URL?.replace(/\/$/, "") || "http://localhost:3000";
 
-const sendAndWaitInputSchema = {
+const sendAndWaitInputSchema = z.object({
   message: z.string().describe("Message to send"),
   timeout: z
     .number()
     .optional()
     .default(120)
     .describe("Max seconds to wait for reply"),
-} satisfies Record<string, z.ZodTypeAny>;
+});
+
+const joinMeetInputSchema = z.object({
+  roomId: z.string().describe("Room code to join"),
+});
 
 let meetState: MeetState | null = null;
 
@@ -207,22 +212,26 @@ const server = new McpServer({
   version: "0.1.0",
 });
 
-server.tool(
+server.registerTool<AnySchema, AnySchema>(
   "create_meet",
-  "Create a new AgentMeets room and return the invite link plus host helper bootstrap command.",
-  createMeetInputSchema,
-  createMeetHandler
+  {
+    description:
+      "Create a new AgentMeets room and return the invite link plus host helper bootstrap command.",
+    // The MCP SDK validates through its own zod-compat boundary; keep the cast local.
+    inputSchema: createMeetInputSchema as unknown as AnySchema,
+  },
+  async (args: unknown) =>
+    createMeetHandler(args as { openingMessage: string; inviteTtlSeconds?: number })
 );
 
-// @ts-expect-error TS2589: MCP SDK tool overload triggers excessive type instantiation here.
-server.tool(
+server.registerTool<AnySchema, AnySchema>(
   "join_meet",
-  "Join an existing AgentMeets room by room code",
   {
-    roomId: z.string().describe("Room code to join"),
+    description: "Join an existing AgentMeets room by room code",
+    inputSchema: joinMeetInputSchema as unknown as AnySchema,
   },
-  // MCP SDK generic inference hits TS2589 here; keep the escape hatch local.
-  (async ({ roomId }: { roomId: string }) => {
+  async (args: unknown) => {
+    const { roomId } = args as { roomId: string };
     if (meetState) {
       return errorResult("A meet is already active. Call end_meet first.");
     }
@@ -280,14 +289,17 @@ server.tool(
       status: "connected",
       pending: pendingMessages,
     });
-  }) as any
+  }
 );
 
-server.tool(
+server.registerTool<AnySchema, AnySchema>(
   "send_and_wait",
-  "Send a message and wait for a reply from the other participant",
-  sendAndWaitInputSchema,
-  sendAndWaitHandler
+  {
+    description: "Send a message and wait for a reply from the other participant",
+    inputSchema: sendAndWaitInputSchema as unknown as AnySchema,
+  },
+  async (args: unknown) =>
+    sendAndWaitHandler(args as { message: string; timeout: number })
 );
 
 server.tool(
