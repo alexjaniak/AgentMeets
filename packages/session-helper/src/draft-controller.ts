@@ -37,6 +37,10 @@ export function createDraftController({
       return cloneSessionHelperState(state);
     },
     resumeAutoMode() {
+      if (state.terminal) {
+        return [];
+      }
+
       const events: DraftControllerEvent[] = [];
 
       if (state.draftMode !== "auto") {

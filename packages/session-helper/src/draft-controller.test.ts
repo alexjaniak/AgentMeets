@@ -238,4 +238,58 @@ describe("createDraftController", () => {
       }),
     ).toEqual([]);
   });
+
+  test("does not resume auto mode or release queued inbound after a terminal event", async () => {
+    const module = await import("./draft-controller.js").catch(() => null);
+
+    expect(module).not.toBeNull();
+    if (!module) {
+      return;
+    }
+
+    const controller = module.createDraftController({ roomId: "ROOM-789" });
+    controller.applyCountdownResult({
+      kind: "expired",
+      durationMs: 120_000,
+    });
+
+    const queuedMessage = {
+      type: "message" as const,
+      messageId: 10,
+      sender: "guest" as const,
+      clientMessageId: "guest-10",
+      replyToMessageId: null,
+      content: "queued before shutdown",
+      createdAt: "2026-03-24 12:00:10",
+    };
+
+    expect(controller.processServerMessage(queuedMessage)).toEqual([
+      {
+        kind: "inbound_queued",
+        messageId: 10,
+      },
+    ]);
+
+    expect(
+      controller.processServerMessage({
+        type: "ended",
+        reason: "timeout",
+      }),
+    ).toEqual([
+      {
+        kind: "ended",
+        reason: "timeout",
+      },
+    ]);
+
+    expect(controller.resumeAutoMode()).toEqual([]);
+    expect(controller.getSnapshot()).toMatchObject({
+      draftMode: "manual",
+      queuedInbound: [queuedMessage],
+      terminal: {
+        kind: "ended",
+        reason: "timeout",
+      },
+    });
+  });
 });
