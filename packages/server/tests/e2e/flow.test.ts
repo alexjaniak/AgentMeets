@@ -63,12 +63,12 @@ describe("happy path — full conversation", () => {
     // 9. Agent A sees the room is ended
     const statusA = agentA.getReply();
     expect(statusA.status).toBe("ended");
-    expect(statusA.reason).toBe("closed");
+    expect(statusA.reason).toBe("user_ended");
 
     // Verify room is closed in DB
     const roomFinal = getRoom(db, roomId)!;
     expect(roomFinal.status).toBe("closed");
-    expect(roomFinal.close_reason).toBe("closed");
+    expect(roomFinal.close_reason).toBe("user_ended");
   });
 });
 
@@ -140,12 +140,12 @@ describe("end from host side", () => {
     // Guest checks status
     const guestStatus = agentB.getReply();
     expect(guestStatus.status).toBe("ended");
-    expect(guestStatus.reason).toBe("closed");
+    expect(guestStatus.reason).toBe("user_ended");
 
     // Verify DB state
     const room = getRoom(db, roomId)!;
     expect(room.status).toBe("closed");
-    expect(room.close_reason).toBe("closed");
+    expect(room.close_reason).toBe("user_ended");
   });
 });
 
@@ -167,7 +167,7 @@ describe("end from guest side", () => {
     // Host checks status
     const hostStatus = agentA.getReply();
     expect(hostStatus.status).toBe("ended");
-    expect(hostStatus.reason).toBe("closed");
+    expect(hostStatus.reason).toBe("user_ended");
   });
 });
 
@@ -334,6 +334,6 @@ describe("edge cases", () => {
     room = getRoom(db, roomId)!;
     expect(room.status).toBe("closed");
     expect(room.closed_at).toBeTruthy();
-    expect(room.close_reason).toBe("closed");
+    expect(room.close_reason).toBe("user_ended");
   });
 });

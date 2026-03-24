@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import type { Room, CloseReason, Sender } from "@agentmeets/shared";
+import type { Room, StoredCloseReason, Sender } from "@agentmeets/shared";
 
 export function createRoom(
   db: Database,
@@ -42,7 +42,7 @@ export function joinRoom(
 export function closeRoom(
   db: Database,
   id: string,
-  reason: CloseReason,
+  reason: StoredCloseReason,
 ): void {
   const stmt = db.prepare(
     `UPDATE rooms SET status = 'closed', closed_at = datetime('now'), close_reason = ? WHERE id = ?`,

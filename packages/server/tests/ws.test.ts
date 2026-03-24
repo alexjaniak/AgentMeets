@@ -128,33 +128,63 @@ describe("WebSocket relay — integration tests", () => {
     hostWs.close();
   });
 
-  test("host receives 'joined' when guest connects", async () => {
+  test("both peers receive 'room_active' when guest connects", async () => {
     const hostWs = connectAs("host-token-123");
     await waitForOpen(hostWs);
 
-    const joinedPromise = waitForMessage(hostWs);
+    const hostActivationPromise = waitForMessage(hostWs);
     const guestWs = connectAs("guest-token-456");
     await waitForOpen(guestWs);
 
-    const msg = await joinedPromise;
-    expect(msg).toEqual({ type: "joined" });
+    const hostActivation = await hostActivationPromise;
+    expect(hostActivation).toEqual({ type: "room_active" });
+
+    const guestActivation = await waitForMessage(guestWs);
+    expect(guestActivation).toEqual({ type: "room_active" });
 
     hostWs.close();
     guestWs.close();
   });
 
-  test("messages relay from host to guest", async () => {
+  test("sender receives ack and receiver gets enriched message", async () => {
     const hostWs = connectAs("host-token-123");
     await waitForOpen(hostWs);
 
     const guestWs = connectAs("guest-token-456");
     await waitForOpen(guestWs);
-    await waitForMessage(hostWs); // consume 'joined'
+    await waitForMessage(hostWs); // consume 'room_active'
+    await waitForMessage(guestWs); // consume 'room_active'
 
+    const ackPromise = waitForMessage(hostWs);
     const msgPromise = waitForMessage(guestWs);
-    hostWs.send(JSON.stringify({ type: "message", content: "hello guest" }));
-    const msg = await msgPromise;
-    expect(msg).toEqual({ type: "message", content: "hello guest" });
+    hostWs.send(
+      JSON.stringify({
+        type: "message",
+        clientMessageId: "host-msg-1",
+        replyToMessageId: null,
+        content: "hello guest",
+      }),
+    );
+
+    const ack = (await ackPromise) as Record<string, unknown>;
+    expect(ack).toMatchObject({
+      type: "ack",
+      clientMessageId: "host-msg-1",
+      replyToMessageId: null,
+    });
+    expect(typeof ack.messageId).toBe("number");
+    expect(typeof ack.createdAt).toBe("string");
+
+    const msg = (await msgPromise) as Record<string, unknown>;
+    expect(msg).toMatchObject({
+      type: "message",
+      sender: "host",
+      clientMessageId: "host-msg-1",
+      replyToMessageId: null,
+      content: "hello guest",
+    });
+    expect(typeof msg.messageId).toBe("number");
+    expect(typeof msg.createdAt).toBe("string");
 
     // Verify message was persisted in DB
     const messages = db
@@ -174,15 +204,59 @@ describe("WebSocket relay — integration tests", () => {
 
     const guestWs = connectAs("guest-token-456");
     await waitForOpen(guestWs);
-    await waitForMessage(hostWs); // consume 'joined'
+    await waitForMessage(hostWs); // consume 'room_active'
+    await waitForMessage(guestWs); // consume 'room_active'
 
+    const ackPromise = waitForMessage(guestWs);
     const msgPromise = waitForMessage(hostWs);
-    guestWs.send(JSON.stringify({ type: "message", content: "hello host" }));
-    const msg = await msgPromise;
-    expect(msg).toEqual({ type: "message", content: "hello host" });
+    guestWs.send(
+      JSON.stringify({
+        type: "message",
+        clientMessageId: "guest-msg-1",
+        replyToMessageId: 1,
+        content: "hello host",
+      }),
+    );
+
+    const ack = (await ackPromise) as Record<string, unknown>;
+    expect(ack).toMatchObject({
+      type: "ack",
+      clientMessageId: "guest-msg-1",
+      replyToMessageId: 1,
+    });
+    expect(typeof ack.messageId).toBe("number");
+    expect(typeof ack.createdAt).toBe("string");
+
+    const msg = (await msgPromise) as Record<string, unknown>;
+    expect(msg).toMatchObject({
+      type: "message",
+      sender: "guest",
+      clientMessageId: "guest-msg-1",
+      replyToMessageId: 1,
+      content: "hello host",
+    });
+    expect(typeof msg.messageId).toBe("number");
+    expect(typeof msg.createdAt).toBe("string");
 
     hostWs.close();
     guestWs.close();
+  });
+
+  test("invalid client payload returns error event", async () => {
+    const hostWs = connectAs("host-token-123");
+    await waitForOpen(hostWs);
+
+    const errorPromise = waitForMessage(hostWs);
+    hostWs.send(JSON.stringify({ type: "message", content: "missing id" }));
+
+    const msg = (await errorPromise) as Record<string, unknown>;
+    expect(msg).toMatchObject({
+      type: "error",
+      code: "invalid_message",
+    });
+    expect(typeof msg.message).toBe("string");
+
+    hostWs.close();
   });
 
   test("end from host notifies guest", async () => {
@@ -191,17 +265,18 @@ describe("WebSocket relay — integration tests", () => {
 
     const guestWs = connectAs("guest-token-456");
     await waitForOpen(guestWs);
-    await waitForMessage(hostWs); // consume 'joined'
+    await waitForMessage(hostWs); // consume 'room_active'
+    await waitForMessage(guestWs); // consume 'room_active'
 
     const endedPromise = waitForMessage(guestWs);
     hostWs.send(JSON.stringify({ type: "end" }));
     const msg = await endedPromise;
-    expect(msg).toEqual({ type: "ended", reason: "closed" });
+    expect(msg).toEqual({ type: "ended", reason: "user_ended" });
 
     // Verify room was closed in DB
     const room = db.prepare("SELECT * FROM rooms WHERE id = ?").get("ROOM01") as Room;
     expect(room.status).toBe("closed");
-    expect(room.close_reason).toBe("closed");
+    expect(room.close_reason).toBe("user_ended");
   });
 
   test("end from guest notifies host", async () => {
@@ -210,12 +285,13 @@ describe("WebSocket relay — integration tests", () => {
 
     const guestWs = connectAs("guest-token-456");
     await waitForOpen(guestWs);
-    await waitForMessage(hostWs); // consume 'joined'
+    await waitForMessage(hostWs); // consume 'room_active'
+    await waitForMessage(guestWs); // consume 'room_active'
 
     const endedPromise = waitForMessage(hostWs);
     guestWs.send(JSON.stringify({ type: "end" }));
     const msg = await endedPromise;
-    expect(msg).toEqual({ type: "ended", reason: "closed" });
+    expect(msg).toEqual({ type: "ended", reason: "user_ended" });
   });
 
   test("host disconnect notifies guest", async () => {
@@ -224,12 +300,13 @@ describe("WebSocket relay — integration tests", () => {
 
     const guestWs = connectAs("guest-token-456");
     await waitForOpen(guestWs);
-    await waitForMessage(hostWs); // consume 'joined'
+    await waitForMessage(hostWs); // consume 'room_active'
+    await waitForMessage(guestWs); // consume 'room_active'
 
     const endedPromise = waitForMessage(guestWs);
     hostWs.close();
     const msg = await endedPromise;
-    expect(msg).toEqual({ type: "ended", reason: "closed" });
+    expect(msg).toEqual({ type: "ended", reason: "disconnected" });
   });
 
   test("guest disconnect notifies host", async () => {
@@ -238,12 +315,13 @@ describe("WebSocket relay — integration tests", () => {
 
     const guestWs = connectAs("guest-token-456");
     await waitForOpen(guestWs);
-    await waitForMessage(hostWs); // consume 'joined'
+    await waitForMessage(hostWs); // consume 'room_active'
+    await waitForMessage(guestWs); // consume 'room_active'
 
     const endedPromise = waitForMessage(hostWs);
     guestWs.close();
     const msg = await endedPromise;
-    expect(msg).toEqual({ type: "ended", reason: "closed" });
+    expect(msg).toEqual({ type: "ended", reason: "disconnected" });
   });
 
   test("message size limit is enforced", async () => {
@@ -252,11 +330,19 @@ describe("WebSocket relay — integration tests", () => {
 
     const guestWs = connectAs("guest-token-456");
     await waitForOpen(guestWs);
-    await waitForMessage(hostWs); // consume 'joined'
+    await waitForMessage(hostWs); // consume 'room_active'
+    await waitForMessage(guestWs); // consume 'room_active'
 
     const closePromise = waitForClose(hostWs);
     const bigContent = "x".repeat(100 * 1024 + 1);
-    hostWs.send(JSON.stringify({ type: "message", content: bigContent }));
+    hostWs.send(
+      JSON.stringify({
+        type: "message",
+        clientMessageId: "too-big-1",
+        replyToMessageId: null,
+        content: bigContent,
+      }),
+    );
     const close = await closePromise;
     expect(close.code).toBe(1009);
 
@@ -269,7 +355,8 @@ describe("WebSocket relay — integration tests", () => {
 
     const guestWs = connectAs("guest-token-456");
     await waitForOpen(guestWs);
-    await waitForMessage(hostWs); // consume 'joined'
+    await waitForMessage(hostWs); // consume 'room_active'
+    await waitForMessage(guestWs); // consume 'room_active'
 
     // Each emoji (e.g. 🎉) is 4 bytes in UTF-8 but 2 UTF-16 code units.
     // 25601 emoji × 4 bytes = 102404 bytes > 100KB, but only 51202 UTF-16 code units.
@@ -279,7 +366,14 @@ describe("WebSocket relay — integration tests", () => {
     const bigContent = emoji.repeat(count);
     expect(bigContent.length).toBeLessThan(100 * 1024); // under limit by character count
     expect(Buffer.byteLength(bigContent, "utf8")).toBeGreaterThan(100 * 1024); // over limit by byte length
-    hostWs.send(JSON.stringify({ type: "message", content: bigContent }));
+    hostWs.send(
+      JSON.stringify({
+        type: "message",
+        clientMessageId: "too-big-emoji-1",
+        replyToMessageId: null,
+        content: bigContent,
+      }),
+    );
     const close = await closePromise;
     expect(close.code).toBe(1009);
 
@@ -375,12 +469,28 @@ describe("RoomManager timeouts", () => {
         `ws://localhost:${server.port}/rooms/ROOM01/ws?token=guest-token-456`,
       );
       await waitForOpen(guestWs);
-      await waitForMessage(hostWs); // consume 'joined'
+      await waitForMessage(hostWs); // consume 'room_active'
+      await waitForMessage(guestWs); // consume 'room_active'
 
       const msgPromise = waitForMessage(guestWs);
-      hostWs.send(JSON.stringify({ type: "message", content: "ping" }));
+      const ackPromise = waitForMessage(hostWs);
+      hostWs.send(
+        JSON.stringify({
+          type: "message",
+          clientMessageId: "ping-1",
+          replyToMessageId: null,
+          content: "ping",
+        }),
+      );
+      await ackPromise;
       const msg = await msgPromise;
-      expect(msg).toEqual({ type: "message", content: "ping" });
+      expect(msg).toMatchObject({
+        type: "message",
+        sender: "host",
+        clientMessageId: "ping-1",
+        replyToMessageId: null,
+        content: "ping",
+      });
 
       expect(roomManager.hasRoom("ROOM01")).toBe(true);
 
@@ -423,7 +533,8 @@ describe("RoomManager timeouts", () => {
         `ws://localhost:${server.port}/rooms/ROOM01/ws?token=guest-token-456`,
       );
       await waitForOpen(guestWs);
-      await waitForMessage(hostWs); // consume 'joined'
+      await waitForMessage(hostWs); // consume 'room_active'
+      await waitForMessage(guestWs); // consume 'room_active'
 
       expect(roomManager.hasRoom("ROOM01")).toBe(true);
 

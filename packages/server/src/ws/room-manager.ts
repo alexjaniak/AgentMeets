@@ -1,7 +1,7 @@
 import type { Sender, CloseReason, ServerMessage } from "@agentmeets/shared";
 import type { ServerWebSocket } from "bun";
 import { Database } from "bun:sqlite";
-import { closeRoom, saveMessage, joinRoom } from "../db/index.js";
+import { closeRoom, saveMessage } from "../db/index.js";
 
 export interface WsData {
   roomId: string;
@@ -12,11 +12,18 @@ interface ActiveRoom {
   roomId: string;
   host: ServerWebSocket<WsData> | null;
   guest: ServerWebSocket<WsData> | null;
+  isActive: boolean;
   timers: {
     join?: Timer;
     idle?: Timer;
     hard?: Timer;
   };
+}
+
+interface RelayMessageInput {
+  clientMessageId: string;
+  replyToMessageId: number | null;
+  content: string;
 }
 
 const DEFAULT_JOIN_TIMEOUT_MS = 5 * 60 * 1000;
@@ -35,7 +42,7 @@ export class RoomManager {
   addConnection(roomId: string, role: Sender, ws: ServerWebSocket<WsData>): void {
     let room = this.rooms.get(roomId);
     if (!room) {
-      room = { roomId, host: null, guest: null, timers: {} };
+      room = { roomId, host: null, guest: null, isActive: false, timers: {} };
       this.rooms.set(roomId, room);
     }
 
@@ -43,9 +50,9 @@ export class RoomManager {
 
     if (role === "host") {
       this.startJoinTimeout(roomId);
-    } else if (role === "guest") {
-      this.onGuestJoined(roomId);
     }
+
+    this.maybeActivateRoom(roomId);
   }
 
   removeConnection(roomId: string, role: Sender): void {
@@ -79,16 +86,34 @@ export class RoomManager {
     this.rooms.delete(roomId);
   }
 
-  handleMessage(roomId: string, senderRole: Sender, content: string): boolean {
-    if (Buffer.byteLength(content, "utf8") > MAX_MESSAGE_SIZE) {
+  handleMessage(roomId: string, senderRole: Sender, message: RelayMessageInput): boolean {
+    if (Buffer.byteLength(message.content, "utf8") > MAX_MESSAGE_SIZE) {
       return false;
     }
 
-    saveMessage(this.db, roomId, senderRole, content);
+    const persisted = saveMessage(this.db, roomId, senderRole, message.content);
+    const sender = this.getConnection(roomId, senderRole);
+    if (sender) {
+      sendJson(sender, {
+        type: "ack",
+        messageId: persisted.id,
+        clientMessageId: message.clientMessageId,
+        replyToMessageId: message.replyToMessageId,
+        createdAt: persisted.created_at,
+      });
+    }
 
     const other = this.getOtherParticipant(roomId, senderRole);
     if (other) {
-      sendJson(other, { type: "message", content });
+      sendJson(other, {
+        type: "message",
+        messageId: persisted.id,
+        sender: senderRole,
+        clientMessageId: message.clientMessageId,
+        replyToMessageId: message.replyToMessageId,
+        content: message.content,
+        createdAt: persisted.created_at,
+      });
     }
 
     this.resetIdleTimeout(roomId);
@@ -96,36 +121,41 @@ export class RoomManager {
   }
 
   handleEnd(roomId: string, senderRole: Sender): void {
-    closeRoom(this.db, roomId, "closed");
+    closeRoom(this.db, roomId, "user_ended");
 
     const other = this.getOtherParticipant(roomId, senderRole);
     if (other) {
-      sendJson(other, { type: "ended", reason: "closed" });
-      other.close(1000, "Room closed");
+      sendJson(other, { type: "ended", reason: "user_ended" });
     }
 
     const sender = this.getConnection(roomId, senderRole);
+    this.cleanupRoom(roomId);
+
+    if (other) {
+      other.close(1000, "Room closed");
+    }
     if (sender) {
       sender.close(1000, "Room closed");
     }
-
-    this.cleanupRoom(roomId);
   }
 
   handleDisconnect(roomId: string, disconnectedRole: Sender): void {
     const room = this.rooms.get(roomId);
     if (!room) return;
 
-    closeRoom(this.db, roomId, "closed");
+    closeRoom(this.db, roomId, "disconnected");
 
     const otherRole: Sender = disconnectedRole === "host" ? "guest" : "host";
     const other = room[otherRole];
     if (other) {
-      sendJson(other, { type: "ended", reason: "closed" });
-      other.close(1000, "Other participant disconnected");
+      sendJson(other, { type: "ended", reason: "disconnected" });
     }
 
     this.cleanupRoom(roomId);
+
+    if (other) {
+      other.close(1000, "Other participant disconnected");
+    }
   }
 
   // --- Timeout management ---
@@ -138,30 +168,26 @@ export class RoomManager {
       closeRoom(this.db, roomId, "timeout");
       if (room.host) {
         sendJson(room.host, { type: "ended", reason: "timeout" });
-        room.host.close(1000, "Join timeout");
       }
       this.cleanupRoom(roomId);
+      if (room.host) {
+        room.host.close(1000, "Join timeout");
+      }
     }, DEFAULT_JOIN_TIMEOUT_MS);
   }
 
-  private onGuestJoined(roomId: string): void {
+  private maybeActivateRoom(roomId: string): void {
     const room = this.rooms.get(roomId);
     if (!room) return;
+    if (room.isActive || !room.host || !room.guest) return;
 
-    // Cancel join timeout
+    room.isActive = true;
     clearTimeout(room.timers.join);
     room.timers.join = undefined;
 
-    // Room activation (waiting → active) is handled by the REST API's join
-    // endpoint, which calls joinRoom() to set the guest_token and status.
-    // By the time the guest connects via WebSocket, the room is already active.
+    sendJson(room.host, { type: "room_active" });
+    sendJson(room.guest, { type: "room_active" });
 
-    // Notify host
-    if (room.host) {
-      sendJson(room.host, { type: "joined" });
-    }
-
-    // Start idle and hard timeouts
     this.resetIdleTimeout(roomId);
     this.startHardTimeout(roomId);
   }
@@ -172,7 +198,7 @@ export class RoomManager {
 
     clearTimeout(room.timers.idle);
     room.timers.idle = setTimeout(() => {
-      this.expireRoom(roomId, "idle");
+      this.expireRoom(roomId, "timeout");
     }, DEFAULT_IDLE_TIMEOUT_MS);
   }
 
@@ -192,16 +218,19 @@ export class RoomManager {
     closeRoom(this.db, roomId, reason);
 
     const msg: ServerMessage = { type: "ended", reason };
-    if (room.host) {
-      sendJson(room.host, msg);
-      room.host.close(1000, `Room ${reason}`);
-    }
-    if (room.guest) {
-      sendJson(room.guest, msg);
-      room.guest.close(1000, `Room ${reason}`);
-    }
+    const host = room.host;
+    const guest = room.guest;
 
     this.cleanupRoom(roomId);
+
+    if (host) {
+      sendJson(host, msg);
+      host.close(1000, `Room ${reason}`);
+    }
+    if (guest) {
+      sendJson(guest, msg);
+      guest.close(1000, `Room ${reason}`);
+    }
   }
 }
 
