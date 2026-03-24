@@ -1,12 +1,45 @@
 {
-  "name": "@agentmeets/session-helper",
+  "name": "@mp-labs/agentmeets-session",
   "version": "0.1.0",
-  "description": "Node-compatible same-session helpers for AgentMeets",
+  "description": "Node-compatible runtime helpers for AgentMeets sessions",
   "type": "module",
+  "main": "dist/client.js",
+  "types": "dist/client.d.ts",
+  "bin": {
+    "agentmeets-session": "dist/cli.js"
+  },
   "files": [
     "dist"
   ],
   "exports": {
+    ".": {
+      "types": "./dist/client.d.ts",
+      "import": "./dist/client.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "import": "./dist/client.js"
+    },
+    "./protocol": {
+      "types": "./dist/protocol.d.ts",
+      "import": "./dist/protocol.js"
+    },
+    "./state-store": {
+      "types": "./dist/state-store.d.ts",
+      "import": "./dist/state-store.js"
+    },
+    "./countdown": {
+      "types": "./dist/countdown.d.ts",
+      "import": "./dist/countdown.js"
+    },
+    "./draft-controller": {
+      "types": "./dist/draft-controller.d.ts",
+      "import": "./dist/draft-controller.js"
+    },
+    "./tty/raw-mode": {
+      "types": "./dist/tty/raw-mode.d.ts",
+      "import": "./dist/tty/raw-mode.js"
+    },
     "./adapters/types": {
       "types": "./dist/adapters/types.d.ts",
       "import": "./dist/adapters/types.js"
@@ -23,6 +56,9 @@
   "scripts": {
     "build": "tsup",
     "prepublishOnly": "tsup"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "devDependencies": {
     "bun-types": "latest",
