@@ -391,6 +391,8 @@ describe("WebSocket relay — integration tests", () => {
         `ws://localhost:${server.port}/rooms/ROOM01/ws?token=guest-token-456`,
       );
       await waitForOpen(guestWs);
+      const ended = await waitForMessage(guestWs);
+      expect(ended).toEqual({ type: "ended", reason: "join_failed" });
       const close = await waitForClose(guestWs);
       expect(close.reason).toBe("join_failed");
 
@@ -416,8 +418,11 @@ describe("WebSocket relay — integration tests", () => {
     await waitForMessage(hostWs); // consume 'room_active'
     await waitForMessage(guestWs); // consume 'room_active'
 
+    const endedPromise = waitForMessage(guestWs);
     const closePromise = waitForClose(guestWs);
     hostWs.close();
+    const ended = await endedPromise;
+    expect(ended).toEqual({ type: "ended", reason: "disconnected" });
     const close = await closePromise;
     expect(close.reason).toBe("disconnected");
 
@@ -435,8 +440,11 @@ describe("WebSocket relay — integration tests", () => {
     await waitForMessage(hostWs); // consume 'room_active'
     await waitForMessage(guestWs); // consume 'room_active'
 
+    const endedPromise = waitForMessage(hostWs);
     const closePromise = waitForClose(hostWs);
     guestWs.close();
+    const ended = await endedPromise;
+    expect(ended).toEqual({ type: "ended", reason: "disconnected" });
     const close = await closePromise;
     expect(close.reason).toBe("disconnected");
 
