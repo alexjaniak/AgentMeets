@@ -34,3 +34,16 @@ export function getPendingMessages(
   );
   return stmt.all(roomId) as Message[];
 }
+
+export function getOpeningMessage(
+  db: Database,
+  roomId: string,
+): Message | null {
+  const stmt = db.prepare(
+    `SELECT m.*
+     FROM rooms r
+     JOIN messages m ON m.id = r.opening_message_id
+     WHERE r.id = ?`,
+  );
+  return (stmt.get(roomId) as Message | undefined) ?? null;
+}

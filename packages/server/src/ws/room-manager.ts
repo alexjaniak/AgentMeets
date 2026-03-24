@@ -2,6 +2,7 @@ import type { Sender, CloseReason, ServerMessage } from "@agentmeets/shared";
 import type { ServerWebSocket } from "bun";
 import { Database } from "bun:sqlite";
 import { activateRoom, closeRoom, saveMessage } from "../db/index.js";
+import { getOpeningMessage } from "../db/messages.js";
 
 export interface WsData {
   roomId: string;
@@ -26,6 +27,12 @@ interface RelayMessageInput {
   content: string;
 }
 
+interface RoomManagerOptions {
+  joinTimeoutMs?: number;
+  idleTimeoutMs?: number;
+  hardTimeoutMs?: number;
+}
+
 const DEFAULT_JOIN_TIMEOUT_MS = 5 * 60 * 1000;
 const DEFAULT_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
 const DEFAULT_HARD_TIMEOUT_MS = 30 * 60 * 1000;
@@ -34,9 +41,15 @@ const MAX_MESSAGE_SIZE = 100 * 1024; // 100KB
 export class RoomManager {
   private rooms = new Map<string, ActiveRoom>();
   private db: Database;
+  private joinTimeoutMs: number;
+  private idleTimeoutMs: number;
+  private hardTimeoutMs: number;
 
-  constructor(db: Database) {
+  constructor(db: Database, options: RoomManagerOptions = {}) {
     this.db = db;
+    this.joinTimeoutMs = options.joinTimeoutMs ?? DEFAULT_JOIN_TIMEOUT_MS;
+    this.idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
+    this.hardTimeoutMs = options.hardTimeoutMs ?? DEFAULT_HARD_TIMEOUT_MS;
   }
 
   addConnection(roomId: string, role: Sender, ws: ServerWebSocket<WsData>): void {
@@ -48,7 +61,7 @@ export class RoomManager {
 
     room[role] = ws;
 
-    if (role === "host") {
+    if (!room.timers.join && !room.isActive) {
       this.startJoinTimeout(roomId);
     }
 
@@ -145,6 +158,14 @@ export class RoomManager {
     const room = this.rooms.get(roomId);
     if (!room) return;
 
+    if (!room.isActive) {
+      const hasConnections = room.host || room.guest;
+      if (!hasConnections) {
+        this.cleanupRoom(roomId);
+      }
+      return;
+    }
+
     closeRoom(this.db, roomId, "disconnected");
 
     const otherRole: Sender = disconnectedRole === "host" ? "guest" : "host";
@@ -156,7 +177,7 @@ export class RoomManager {
     this.cleanupRoom(roomId);
 
     if (other) {
-      other.close(1000, "Other participant disconnected");
+      other.close(1000, "disconnected");
     }
   }
 
@@ -167,15 +188,21 @@ export class RoomManager {
     if (!room) return;
 
     room.timers.join = setTimeout(() => {
-      closeRoom(this.db, roomId, "timeout");
+      closeRoom(this.db, roomId, "join_failed");
       if (room.host) {
-        sendJson(room.host, { type: "ended", reason: "timeout" });
+        sendJson(room.host, { type: "ended", reason: "join_failed" });
+      }
+      if (room.guest) {
+        sendJson(room.guest, { type: "ended", reason: "join_failed" });
       }
       this.cleanupRoom(roomId);
       if (room.host) {
-        room.host.close(1000, "Join timeout");
+        room.host.close(1000, "join_failed");
       }
-    }, DEFAULT_JOIN_TIMEOUT_MS);
+      if (room.guest) {
+        room.guest.close(1000, "join_failed");
+      }
+    }, this.joinTimeoutMs);
   }
 
   private maybeActivateRoom(roomId: string): void {
@@ -190,6 +217,7 @@ export class RoomManager {
 
     sendJson(room.host, { type: "room_active" });
     sendJson(room.guest, { type: "room_active" });
+    this.replayOpeningMessage(roomId, room.guest);
 
     this.resetIdleTimeout(roomId);
     this.startHardTimeout(roomId);
@@ -202,7 +230,7 @@ export class RoomManager {
     clearTimeout(room.timers.idle);
     room.timers.idle = setTimeout(() => {
       this.expireRoom(roomId, "timeout");
-    }, DEFAULT_IDLE_TIMEOUT_MS);
+    }, this.idleTimeoutMs);
   }
 
   private startHardTimeout(roomId: string): void {
@@ -211,7 +239,22 @@ export class RoomManager {
 
     room.timers.hard = setTimeout(() => {
       this.expireRoom(roomId, "timeout");
-    }, DEFAULT_HARD_TIMEOUT_MS);
+    }, this.hardTimeoutMs);
+  }
+
+  private replayOpeningMessage(roomId: string, guest: ServerWebSocket<WsData>): void {
+    const openingMessage = getOpeningMessage(this.db, roomId);
+    if (!openingMessage) return;
+
+    sendJson(guest, {
+      type: "message",
+      messageId: openingMessage.id,
+      sender: "host",
+      clientMessageId: `persisted:${openingMessage.id}`,
+      replyToMessageId: null,
+      content: openingMessage.content,
+      createdAt: openingMessage.created_at,
+    });
   }
 
   private expireRoom(roomId: string, reason: CloseReason): void {

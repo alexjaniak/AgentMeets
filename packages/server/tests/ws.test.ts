@@ -81,6 +81,22 @@ function waitForOpen(ws: WebSocket): Promise<void> {
   });
 }
 
+function expectNoMessage(ws: WebSocket, durationMs = 100): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const onMessage = () => {
+      clearTimeout(timeout);
+      reject(new Error("Unexpected message"));
+    };
+
+    const timeout = setTimeout(() => {
+      ws.removeEventListener("message", onMessage);
+      resolve();
+    }, durationMs);
+
+    ws.addEventListener("message", onMessage, { once: true });
+  });
+}
+
 describe("WebSocket relay — integration tests", () => {
   let server: ReturnType<typeof Bun.serve>;
   let db: Database;
@@ -139,9 +155,10 @@ describe("WebSocket relay — integration tests", () => {
     hostWs.close();
   });
 
-  test("both peers receive 'room_active' when guest connects", async () => {
+  test("room_active is emitted only after both authenticated helpers connect", async () => {
     const hostWs = connectAs("host-token-123");
     await waitForOpen(hostWs);
+    await expectNoMessage(hostWs);
 
     const hostActivationPromise = waitForMessage(hostWs);
     const guestWs = connectAs("guest-token-456");
@@ -153,6 +170,36 @@ describe("WebSocket relay — integration tests", () => {
     const guestActivation = await waitForMessage(guestWs);
     expect(guestActivation).toEqual({ type: "room_active" });
 
+    hostWs.close();
+    guestWs.close();
+  });
+
+  test("guest receives the persisted opening message replay after activation", async () => {
+    const roomId = "ROOM02";
+    createRoom(db, roomId, "host-token-789", "Welcome to the relay.");
+    joinRoom(db, roomId, "guest-token-987");
+
+    const hostWs = connectAs("host-token-789", roomId);
+    await waitForOpen(hostWs);
+
+    const guestWs = connectAs("guest-token-987", roomId);
+    await waitForOpen(guestWs);
+
+    expect(await waitForMessage(hostWs)).toEqual({ type: "room_active" });
+    expect(await waitForMessage(guestWs)).toEqual({ type: "room_active" });
+
+    const replay = (await waitForMessage(guestWs)) as Record<string, unknown>;
+    expect(replay).toMatchObject({
+      type: "message",
+      sender: "host",
+      replyToMessageId: null,
+      content: "Welcome to the relay.",
+    });
+    expect(replay.clientMessageId).toBe(`persisted:${replay.messageId}`);
+    expect(typeof replay.messageId).toBe("number");
+    expect(typeof replay.createdAt).toBe("string");
+
+    roomManager.cleanupRoom(roomId);
     hostWs.close();
     guestWs.close();
   });
@@ -319,22 +366,48 @@ describe("WebSocket relay — integration tests", () => {
     expect(msg).toEqual({ type: "ended", reason: "user_ended" });
   });
 
-  test("host disconnect notifies guest", async () => {
-    const hostWs = connectAs("host-token-123");
-    await waitForOpen(hostWs);
+  test("activation timeout closes the relay with join_failed", async () => {
+    const db = createTestDb();
+    setupRoom(db);
+    const roomManager = new RoomManager(db, { joinTimeoutMs: 50 });
+    const wsHandlers = createWebSocketHandlers(roomManager);
 
-    const guestWs = connectAs("guest-token-456");
-    await waitForOpen(guestWs);
-    await waitForMessage(hostWs); // consume 'room_active'
-    await waitForMessage(guestWs); // consume 'room_active'
+    const server = Bun.serve<WsData>({
+      port: 0,
+      fetch(req, srv) {
+        const upgradeResp = handleUpgrade(req, srv, db, roomManager);
+        if (upgradeResp) return upgradeResp;
+        const url = new URL(req.url);
+        if (url.pathname.match(/^\/rooms\/[^/]+\/ws$/)) {
+          return undefined as unknown as Response;
+        }
+        return new Response("Not found", { status: 404 });
+      },
+      websocket: wsHandlers,
+    });
 
-    const endedPromise = waitForMessage(guestWs);
-    hostWs.close();
-    const msg = await endedPromise;
-    expect(msg).toEqual({ type: "ended", reason: "disconnected" });
+    try {
+      const guestWs = new WebSocket(
+        `ws://localhost:${server.port}/rooms/ROOM01/ws?token=guest-token-456`,
+      );
+      await waitForOpen(guestWs);
+      const close = await waitForClose(guestWs);
+      expect(close.reason).toBe("join_failed");
+
+      const room = db.prepare("SELECT status, close_reason FROM rooms WHERE id = ?").get("ROOM01") as {
+        status: StoredRoom["status"];
+        close_reason: StoredRoom["close_reason"];
+      };
+      expect(room.status).toBe("closed");
+      expect(room.close_reason).toBe("join_failed");
+    } finally {
+      roomManager.cleanupRoom("ROOM01");
+      server.stop(true);
+      db.close();
+    }
   });
 
-  test("guest disconnect notifies host", async () => {
+  test("host disconnect closes the active guest with reason disconnected", async () => {
     const hostWs = connectAs("host-token-123");
     await waitForOpen(hostWs);
 
@@ -343,10 +416,33 @@ describe("WebSocket relay — integration tests", () => {
     await waitForMessage(hostWs); // consume 'room_active'
     await waitForMessage(guestWs); // consume 'room_active'
 
-    const endedPromise = waitForMessage(hostWs);
+    const closePromise = waitForClose(guestWs);
+    hostWs.close();
+    const close = await closePromise;
+    expect(close.reason).toBe("disconnected");
+
+    const room = db.prepare("SELECT status, close_reason FROM rooms WHERE id = ?").get("ROOM01") as StoredRoom;
+    expect(room.status).toBe("closed");
+    expect(room.close_reason).toBe("disconnected");
+  });
+
+  test("guest disconnect closes the active host with reason disconnected", async () => {
+    const hostWs = connectAs("host-token-123");
+    await waitForOpen(hostWs);
+
+    const guestWs = connectAs("guest-token-456");
+    await waitForOpen(guestWs);
+    await waitForMessage(hostWs); // consume 'room_active'
+    await waitForMessage(guestWs); // consume 'room_active'
+
+    const closePromise = waitForClose(hostWs);
     guestWs.close();
-    const msg = await endedPromise;
-    expect(msg).toEqual({ type: "ended", reason: "disconnected" });
+    const close = await closePromise;
+    expect(close.reason).toBe("disconnected");
+
+    const room = db.prepare("SELECT status, close_reason FROM rooms WHERE id = ?").get("ROOM01") as StoredRoom;
+    expect(room.status).toBe("closed");
+    expect(room.close_reason).toBe("disconnected");
   });
 
   test("message size limit is enforced", async () => {

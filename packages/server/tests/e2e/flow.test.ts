@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Database } from "bun:sqlite";
 import { createTestDatabase, TestAgent, JoinError } from "./helpers.js";
-import { getRoom } from "../../src/db/rooms.js";
+import { createRoom, getRoom } from "../../src/db/rooms.js";
 import { getMessages } from "../../src/db/messages.js";
 import { expireRoom } from "../../src/db/rooms.js";
 
@@ -206,6 +206,20 @@ describe("invalid room code", () => {
 });
 
 describe("message persistence verification", () => {
+  test("opening message is persisted for later guest replay", () => {
+    const room = createRoom(db, "OPEN01", "host-token-1", "Opening context");
+    const messages = getMessages(db, room.id);
+
+    expect(room.opening_message_id).toEqual(expect.any(Number));
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({
+      id: room.opening_message_id,
+      room_id: room.id,
+      sender: "host",
+      content: "Opening context",
+    });
+  });
+
   test("messages are persisted in SQLite in order", async () => {
     const agentA = new TestAgent(db);
     const agentB = new TestAgent(db);
