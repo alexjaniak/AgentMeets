@@ -98,6 +98,22 @@ function expectNoMessage(ws: WebSocket, durationMs = 100): Promise<void> {
   });
 }
 
+function createFakeServerSocket() {
+  const sent: ServerMessage[] = [];
+  const closed: Array<{ code: number; reason: string }> = [];
+
+  const ws = {
+    send(payload: string) {
+      sent.push(JSON.parse(payload) as ServerMessage);
+    },
+    close(code: number, reason: string) {
+      closed.push({ code, reason });
+    },
+  } as unknown as import("bun").ServerWebSocket<WsData>;
+
+  return { ws, sent, closed };
+}
+
 describe("WebSocket relay — integration tests", () => {
   let server: ReturnType<typeof Bun.serve>;
   let db: Database;
@@ -696,6 +712,92 @@ describe("RoomManager timeouts", () => {
       server.stop(true);
       db.close();
     }
+  });
+
+  test("pre-join messages do not start idle expiry before activation", async () => {
+    const db = createTestDb();
+    createRoom(db, "WAIT10", "host-token-wait10", "Opening context", "r_wait10");
+    createInvite(
+      db,
+      "WAIT10",
+      "r_wait10.1",
+      new Date(Date.now() + 200).toISOString(),
+    );
+    createInvite(
+      db,
+      "WAIT10",
+      "r_wait10.2",
+      new Date(Date.now() + 200).toISOString(),
+    );
+
+    const roomManager = new RoomManager(db, { idleTimeoutMs: 50 });
+    const host = createFakeServerSocket();
+
+    roomManager.addConnection("WAIT10", "host", host.ws);
+    const accepted = roomManager.handleMessage("WAIT10", "host", {
+      clientMessageId: "prejoin-1",
+      replyToMessageId: null,
+      content: "still waiting",
+    });
+
+    expect(accepted).toBe(true);
+    expect(host.sent[0]).toMatchObject({
+      type: "ack",
+      clientMessageId: "prejoin-1",
+    });
+
+    await Bun.sleep(100);
+
+    expect(host.sent).toHaveLength(1);
+    expect(host.closed).toHaveLength(0);
+
+    const room = db.prepare("SELECT status FROM rooms WHERE id = ?").get("WAIT10") as {
+      status: StoredRoom["status"];
+    };
+    expect(room.status).toBe("waiting");
+
+    roomManager.cleanupRoom("WAIT10");
+    db.close();
+  });
+
+  test("expired waiting rooms do not activate even if both sockets connect", () => {
+    const db = createTestDb();
+    createRoom(db, "WAIT11", "host-token-wait11", "Opening context", "r_wait11");
+    db.prepare("UPDATE rooms SET guest_token = ? WHERE id = ?").run(
+      "guest-token-wait11",
+      "WAIT11",
+    );
+    createInvite(
+      db,
+      "WAIT11",
+      "r_wait11.1",
+      new Date(Date.now() - 1_000).toISOString(),
+    );
+    createInvite(
+      db,
+      "WAIT11",
+      "r_wait11.2",
+      new Date(Date.now() - 1_000).toISOString(),
+    );
+
+    const roomManager = new RoomManager(db);
+    const host = createFakeServerSocket();
+    const guest = createFakeServerSocket();
+
+    roomManager.addConnection("WAIT11", "host", host.ws);
+    roomManager.addConnection("WAIT11", "guest", guest.ws);
+
+    expect(host.sent).toEqual([{ type: "ended", reason: "expired" }]);
+    expect(guest.sent).toEqual([{ type: "ended", reason: "expired" }]);
+    expect(host.closed).toEqual([{ code: 1000, reason: "Room expired" }]);
+    expect(guest.closed).toEqual([{ code: 1000, reason: "Room expired" }]);
+
+    const room = db.prepare("SELECT status FROM rooms WHERE id = ?").get("WAIT11") as {
+      status: StoredRoom["status"];
+    };
+    expect(room.status).toBe("expired");
+
+    db.close();
   });
 });
 

@@ -90,6 +90,7 @@ export class RoomManager {
   }
 
   handleMessage(roomId: string, senderRole: Sender, message: RelayMessageInput): boolean {
+    const room = this.rooms.get(roomId);
     if (Buffer.byteLength(message.content, "utf8") > MAX_MESSAGE_SIZE) {
       return false;
     }
@@ -119,7 +120,9 @@ export class RoomManager {
       });
     }
 
-    this.resetIdleTimeout(roomId);
+    if (room?.isActive) {
+      this.resetIdleTimeout(roomId);
+    }
     return true;
   }
 
@@ -191,6 +194,14 @@ export class RoomManager {
     const room = this.rooms.get(roomId);
     if (!room) return;
     if (room.isActive || !room.host || !room.guest) return;
+
+    const inviteExpiry = this.getInviteExpiry(roomId);
+    if (inviteExpiry && inviteExpiry.getTime() <= Date.now()) {
+      clearTimeout(room.timers.expiry);
+      room.timers.expiry = undefined;
+      this.expireRoom(roomId);
+      return;
+    }
 
     room.isActive = true;
     clearTimeout(room.timers.expiry);
