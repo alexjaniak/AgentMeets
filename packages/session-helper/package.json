@@ -55,6 +55,7 @@
   },
   "scripts": {
     "build": "tsup",
+    "test": "bun test",
     "prepack": "bun run build",
     "prepublishOnly": "bun run build"
   },

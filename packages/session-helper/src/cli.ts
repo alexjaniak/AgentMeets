@@ -4,15 +4,30 @@ import { CodexAdapter } from "./adapters/codex.js";
 
 export type SessionAdapterName = "claude-code" | "codex";
 
+interface HostBootstrapAdapter {
+  injectHostReadyPrompt: (input: { participantLink: string }) => Promise<void>;
+}
+
 interface CreateSessionAdapterOptions {
   adapterName: SessionAdapterName;
   writeToPty: (chunk: string) => void | Promise<void>;
 }
 
+interface CliEnvironment {
+  stdout: Pick<typeof process.stdout, "write">;
+  stderr: Pick<typeof process.stderr, "write">;
+  openTty: () => number;
+  writeTty: (fd: number, chunk: string) => void;
+  closeTty: (fd: number) => void;
+  createAdapter: (
+    options: CreateSessionAdapterOptions,
+  ) => HostBootstrapAdapter;
+}
+
 const HELP_TEXT = `agentmeets-session
 
 Usage:
-  agentmeets-session host --room-id <roomId> --host-token <token> --invite-link <url> [--adapter claude-code|codex]
+  agentmeets-session host --participant-link <url> [--adapter claude-code|codex]
   agentmeets-session --help
 
 Description:
@@ -21,66 +36,84 @@ Description:
   and supports countdown-driven manual draft fallback.
 `;
 
-export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
+const defaultCliEnvironment: CliEnvironment = {
+  stdout: process.stdout,
+  stderr: process.stderr,
+  openTty() {
+    return openSync("/dev/tty", "w");
+  },
+  writeTty(fd, chunk) {
+    writeSync(fd, chunk);
+  },
+  closeTty(fd) {
+    closeSync(fd);
+  },
+  createAdapter(options) {
+    return createSessionAdapter(options);
+  },
+};
+
+export async function main(
+  argv: string[] = process.argv.slice(2),
+  environment: CliEnvironment = defaultCliEnvironment,
+): Promise<number> {
   if (argv.length === 0 || argv.includes("--help") || argv.includes("-h")) {
-    process.stdout.write(HELP_TEXT);
+    environment.stdout.write(HELP_TEXT);
     return 0;
   }
 
   if (argv[0] === "host") {
-    return runHost(argv.slice(1));
+    return runHost(argv.slice(1), environment);
   }
 
-  process.stderr.write(`Unknown arguments: ${argv.join(" ")}\n\n${HELP_TEXT}`);
+  environment.stderr.write(`Unknown arguments: ${argv.join(" ")}\n\n${HELP_TEXT}`);
   return 1;
 }
 
-async function runHost(argv: string[]): Promise<number> {
+async function runHost(
+  argv: string[],
+  environment: CliEnvironment,
+): Promise<number> {
   const options = parseFlags(argv);
-  const roomId = options["room-id"];
-  const hostToken = options["host-token"];
-  const inviteLink = options["invite-link"];
+  const participantLink = options["participant-link"];
   const adapterName = (options.adapter ?? "claude-code") as string;
 
-  if (!roomId || !hostToken || !inviteLink) {
-    process.stderr.write(
-      "Missing required host arguments: --room-id, --host-token, --invite-link\n",
+  if (!participantLink) {
+    environment.stderr.write(
+      "Missing required host argument: --participant-link\n",
     );
     return 1;
   }
 
   if (!isSessionAdapterName(adapterName)) {
-    process.stderr.write(`Unsupported adapter: ${adapterName}\n`);
+    environment.stderr.write(`Unsupported adapter: ${adapterName}\n`);
     return 1;
   }
 
   let ttyFd: number;
   try {
-    ttyFd = openSync("/dev/tty", "w");
+    ttyFd = environment.openTty();
   } catch (error) {
-    process.stderr.write(
+    environment.stderr.write(
       `Cannot open controlling PTY at /dev/tty: ${formatError(error)}\n`,
     );
     return 1;
   }
 
   try {
-    const adapter = createSessionAdapter({
+    const adapter = environment.createAdapter({
       adapterName,
       writeToPty(chunk) {
-        writeSync(ttyFd, chunk);
+        environment.writeTty(ttyFd, chunk);
       },
     });
 
-    if ("injectHostReadyPrompt" in adapter) {
-      await adapter.injectHostReadyPrompt({
-        roomId,
-        inviteLink,
-      });
-    }
+    await adapter.injectHostReadyPrompt({
+      participantLink,
+    });
     return 0;
   } finally {
-    closeSync(ttyFd);
+    environment.closeTty(ttyFd);
   }
 }
 

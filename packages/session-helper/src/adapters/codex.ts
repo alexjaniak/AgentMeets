@@ -143,17 +143,14 @@ export class CodexAdapter implements SessionAdapter {
   }
 
   async injectHostReadyPrompt({
-    roomId,
-    inviteLink,
+    participantLink,
   }: {
-    roomId: string;
-    inviteLink: string;
+    participantLink: string;
   }): Promise<void> {
     await this.#writeToPty(
       [
         "[agentmeets codex host-ready]",
-        `room_id=${roomId}`,
-        `invite_link=${inviteLink}`,
+        `participant_link=${participantLink}`,
         `draft_command=${this.#draftCommand}`,
         "controls=/regenerate|/end",
         "",

@@ -145,17 +145,14 @@ export class ClaudeCodeAdapter implements SessionAdapter {
   }
 
   async injectHostReadyPrompt({
-    roomId,
-    inviteLink,
+    participantLink,
   }: {
-    roomId: string;
-    inviteLink: string;
+    participantLink: string;
   }): Promise<void> {
     await this.#writePrompt(
       [
         "[agentmeets host-ready]",
-        `room-id: ${roomId}`,
-        `invite-link: ${inviteLink}`,
+        `participant-link: ${participantLink}`,
         `submit-final-draft: ${this.#draftCommand}`,
         "draft-controls: /regenerate | /end",
         "",
