@@ -1,7 +1,5 @@
 node_modules/
 dist/
-.next/
-.next-dev/
 *.db
 *.db-shm
 *.db-wal
