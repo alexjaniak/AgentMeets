@@ -9,7 +9,7 @@ import {
 } from "../../src/db/rooms.js";
 import { saveMessage, getMessages } from "../../src/db/messages.js";
 import { generateRoomId, generateToken } from "../../src/db/index.js";
-import type { CloseReason, Sender, StoredCloseReason, StoredRoomStatus } from "@agentmeets/shared";
+import type { Sender } from "@agentmeets/shared";
 
 /**
  * Creates a fresh in-memory SQLite database for test isolation.
@@ -138,7 +138,7 @@ export class TestAgent {
       return {
         reply: null,
         status: "ended",
-        reason: mapStoredEndReason(roomBefore.status, roomBefore.close_reason),
+        reason: roomBefore.close_reason ?? "closed",
       };
     }
 
@@ -168,7 +168,7 @@ export class TestAgent {
       return {
         reply: null,
         status: "ended",
-        reason: mapStoredEndReason(room.status, room.close_reason),
+        reason: room.close_reason ?? "closed",
       };
     }
 
@@ -197,9 +197,9 @@ export class TestAgent {
     if (!this.roomId) {
       throw new Error("Not connected to a room");
     }
-    closeRoom(this.db, this.roomId, "user_ended");
+    closeRoom(this.db, this.roomId, "closed");
     this.ended = true;
-    this.endReason = "user_ended";
+    this.endReason = "closed";
     return { status: "ended" };
   }
 }
@@ -210,31 +210,5 @@ export class JoinError extends Error {
     super(message);
     this.name = "JoinError";
     this.statusCode = statusCode;
-  }
-}
-
-function mapStoredEndReason(
-  status: StoredRoomStatus,
-  reason: StoredCloseReason | null,
-): CloseReason {
-  if (status === "expired") {
-    return "expired";
-  }
-
-  switch (reason) {
-    case "user_ended":
-      return "user_ended";
-    case "disconnected":
-      return "disconnected";
-    case "timeout":
-    case "idle":
-      return "timeout";
-    case "expired":
-      return "expired";
-    case "join_failed":
-      return "join_failed";
-    case "closed":
-    case null:
-      return "user_ended";
   }
 }
