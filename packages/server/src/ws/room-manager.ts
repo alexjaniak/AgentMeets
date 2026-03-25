@@ -1,7 +1,7 @@
 import type { Sender, CloseReason, ServerMessage } from "@agentmeets/shared";
 import type { ServerWebSocket } from "bun";
 import { Database } from "bun:sqlite";
-import { activateRoom, closeRoom, saveMessage } from "../db/index.js";
+import { activateRoom, closeRoom, expireRoom, saveMessage } from "../db/index.js";
 import { getOpeningMessage } from "../db/messages.js";
 
 export interface WsData {
@@ -17,7 +17,6 @@ interface ActiveRoom {
   timers: {
     join?: Timer;
     idle?: Timer;
-    hard?: Timer;
   };
 }
 
@@ -30,12 +29,10 @@ interface RelayMessageInput {
 interface RoomManagerOptions {
   joinTimeoutMs?: number;
   idleTimeoutMs?: number;
-  hardTimeoutMs?: number;
 }
 
 const DEFAULT_JOIN_TIMEOUT_MS = 5 * 60 * 1000;
 const DEFAULT_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
-const DEFAULT_HARD_TIMEOUT_MS = 30 * 60 * 1000;
 const MAX_MESSAGE_SIZE = 100 * 1024; // 100KB
 
 export class RoomManager {
@@ -43,13 +40,11 @@ export class RoomManager {
   private db: Database;
   private joinTimeoutMs: number;
   private idleTimeoutMs: number;
-  private hardTimeoutMs: number;
 
   constructor(db: Database, options: RoomManagerOptions = {}) {
     this.db = db;
     this.joinTimeoutMs = options.joinTimeoutMs ?? DEFAULT_JOIN_TIMEOUT_MS;
     this.idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
-    this.hardTimeoutMs = options.hardTimeoutMs ?? DEFAULT_HARD_TIMEOUT_MS;
   }
 
   addConnection(roomId: string, role: Sender, ws: ServerWebSocket<WsData>): void {
@@ -95,7 +90,6 @@ export class RoomManager {
     if (!room) return;
     clearTimeout(room.timers.join);
     clearTimeout(room.timers.idle);
-    clearTimeout(room.timers.hard);
     this.rooms.delete(roomId);
   }
 
@@ -220,7 +214,6 @@ export class RoomManager {
     this.replayOpeningMessage(roomId, room.guest);
 
     this.resetIdleTimeout(roomId);
-    this.startHardTimeout(roomId);
   }
 
   private resetIdleTimeout(roomId: string): void {
@@ -229,17 +222,8 @@ export class RoomManager {
 
     clearTimeout(room.timers.idle);
     room.timers.idle = setTimeout(() => {
-      this.expireRoom(roomId, "timeout");
+      this.expireRoom(roomId);
     }, this.idleTimeoutMs);
-  }
-
-  private startHardTimeout(roomId: string): void {
-    const room = this.rooms.get(roomId);
-    if (!room) return;
-
-    room.timers.hard = setTimeout(() => {
-      this.expireRoom(roomId, "timeout");
-    }, this.hardTimeoutMs);
   }
 
   private replayOpeningMessage(roomId: string, guest: ServerWebSocket<WsData>): void {
@@ -257,13 +241,13 @@ export class RoomManager {
     });
   }
 
-  private expireRoom(roomId: string, reason: CloseReason): void {
+  private expireRoom(roomId: string): void {
     const room = this.rooms.get(roomId);
     if (!room) return;
 
-    closeRoom(this.db, roomId, reason);
+    expireRoom(this.db, roomId);
 
-    const msg: ServerMessage = { type: "ended", reason };
+    const msg: ServerMessage = { type: "ended", reason: "expired" };
     const host = room.host;
     const guest = room.guest;
 
@@ -271,11 +255,11 @@ export class RoomManager {
 
     if (host) {
       sendJson(host, msg);
-      host.close(1000, `Room ${reason}`);
+      host.close(1000, "Room expired");
     }
     if (guest) {
       sendJson(guest, msg);
-      guest.close(1000, `Room ${reason}`);
+      guest.close(1000, "Room expired");
     }
   }
 }

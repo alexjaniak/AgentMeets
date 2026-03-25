@@ -200,6 +200,25 @@ describe("mixed-client helper integration", () => {
 });
 
 describe("room expiry", () => {
+  test("accepted messages update last_activity_at", async () => {
+    const agentA = new TestAgent(db);
+    const agentB = new TestAgent(db);
+    const { roomId } = await agentA.createMeet();
+    await agentB.joinMeet(roomId);
+
+    const staleActivity = "2000-03-24 12:00:00";
+    db.prepare("UPDATE rooms SET last_activity_at = ? WHERE id = ?").run(staleActivity, roomId);
+
+    await agentA.sendAndWait("Still there?");
+
+    const room = db
+      .prepare("SELECT last_activity_at FROM rooms WHERE id = ?")
+      .get(roomId) as { last_activity_at: string | null };
+    expect(room.last_activity_at).toEqual(expect.any(String));
+    expect(room.last_activity_at).not.toBe(staleActivity);
+    expect(Date.parse(room.last_activity_at!)).toBeGreaterThan(Date.parse(staleActivity));
+  });
+
   test("room expires when no one joins within timeout", async () => {
     const agentA = new TestAgent(db);
     const { roomId } = await agentA.createMeet();

@@ -632,10 +632,10 @@ describe("RoomManager timeouts", () => {
     }
   });
 
-  test("hard timeout is started when guest joins", async () => {
+  test("idle timeout expires an active room with reason expired", async () => {
     const db = createTestDb();
     setupRoom(db);
-    const roomManager = new RoomManager(db);
+    const roomManager = new RoomManager(db, { idleTimeoutMs: 50 });
     const wsHandlers = createWebSocketHandlers(roomManager);
 
     const server = Bun.serve<WsData>({
@@ -665,10 +665,19 @@ describe("RoomManager timeouts", () => {
       await waitForMessage(hostWs); // consume 'room_active'
       await waitForMessage(guestWs); // consume 'room_active'
 
-      expect(roomManager.hasRoom("ROOM01")).toBe(true);
+      expect(await waitForMessage(hostWs)).toEqual({ type: "ended", reason: "expired" });
+      expect(await waitForMessage(guestWs)).toEqual({ type: "ended", reason: "expired" });
 
-      hostWs.close();
-      guestWs.close();
+      const room = db.prepare("SELECT status, closed_at, close_reason FROM rooms WHERE id = ?").get(
+        "ROOM01",
+      ) as {
+        status: StoredRoom["status"];
+        closed_at: string | null;
+        close_reason: StoredRoom["close_reason"];
+      };
+      expect(room.status).toBe("expired");
+      expect(room.closed_at).toEqual(expect.any(String));
+      expect(room.close_reason).toBeNull();
     } finally {
       roomManager.cleanupRoom("ROOM01");
       server.stop(true);

@@ -12,7 +12,7 @@ import { rateLimiter } from "../middleware/rate-limit.js";
 
 const ROOM_ID_PATTERN = /^[A-Z0-9]{6}$/;
 const MAX_COLLISION_RETRIES = 3;
-const DEFAULT_INVITE_TTL_MS = 5 * 60 * 1000;
+const DEFAULT_INVITE_TTL_MS = 10 * 60 * 1000;
 const ROOM_STEM_PREFIX = "r_";
 
 export function roomRoutes(db: Database): Hono {
