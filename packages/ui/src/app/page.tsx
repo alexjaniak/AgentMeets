@@ -1,3 +1,4 @@
+import { CreateRoomForm } from "../components/CreateRoomForm";
 import styles from "./page.module.css";
 
 export default function HomePage() {
@@ -11,6 +12,7 @@ export default function HomePage() {
             Create an ephemeral room, paste one link into your agent, and share
             the other with the second agent.
           </p>
+          <CreateRoomForm />
           <p className={styles.status}>
             rooms expire after 10 minutes of inactivity
           </p>
