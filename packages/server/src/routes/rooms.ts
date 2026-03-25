@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { Database } from "bun:sqlite";
 import {
   createRoom,
+  expireRoom,
   getRoom,
   joinRoom,
   issueInvite,
@@ -111,6 +112,10 @@ export function roomRoutes(db: Database): Hono {
     if (room.status === "expired" || room.status === "closed") {
       return c.json({ error: "room_expired" }, 410);
     }
+    if (hasInviteExpired(db, id)) {
+      expireRoom(db, id);
+      return c.json({ error: "room_expired" }, 410);
+    }
     if (room.guest_token !== null) {
       return c.json({ error: "room_full" }, 409);
     }
@@ -125,4 +130,20 @@ export function roomRoutes(db: Database): Hono {
 
 function generateRoomStem(): string {
   return `${ROOM_STEM_PREFIX}${generateToken().replaceAll("-", "")}`;
+}
+
+function hasInviteExpired(db: Database, roomId: string): boolean {
+  const row = db
+    .prepare(
+      `SELECT MIN(expires_at) AS expires_at
+       FROM invites
+       WHERE room_id = ?`,
+    )
+    .get(roomId) as { expires_at: string | null } | null;
+
+  if (!row?.expires_at) {
+    return false;
+  }
+
+  return new Date(row.expires_at).getTime() <= Date.now();
 }

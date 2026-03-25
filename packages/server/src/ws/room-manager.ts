@@ -15,7 +15,7 @@ interface ActiveRoom {
   guest: ServerWebSocket<WsData> | null;
   isActive: boolean;
   timers: {
-    join?: Timer;
+    expiry?: Timer;
     idle?: Timer;
   };
 }
@@ -27,23 +27,19 @@ interface RelayMessageInput {
 }
 
 interface RoomManagerOptions {
-  joinTimeoutMs?: number;
   idleTimeoutMs?: number;
 }
 
-const DEFAULT_JOIN_TIMEOUT_MS = 5 * 60 * 1000;
 const DEFAULT_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
 const MAX_MESSAGE_SIZE = 100 * 1024; // 100KB
 
 export class RoomManager {
   private rooms = new Map<string, ActiveRoom>();
   private db: Database;
-  private joinTimeoutMs: number;
   private idleTimeoutMs: number;
 
   constructor(db: Database, options: RoomManagerOptions = {}) {
     this.db = db;
-    this.joinTimeoutMs = options.joinTimeoutMs ?? DEFAULT_JOIN_TIMEOUT_MS;
     this.idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
   }
 
@@ -56,8 +52,8 @@ export class RoomManager {
 
     room[role] = ws;
 
-    if (!room.timers.join && !room.isActive) {
-      this.startJoinTimeout(roomId);
+    if (!room.timers.expiry && !room.isActive) {
+      this.startWaitingExpiryTimer(roomId);
     }
 
     this.maybeActivateRoom(roomId);
@@ -88,7 +84,7 @@ export class RoomManager {
   cleanupRoom(roomId: string): void {
     const room = this.rooms.get(roomId);
     if (!room) return;
-    clearTimeout(room.timers.join);
+    clearTimeout(room.timers.expiry);
     clearTimeout(room.timers.idle);
     this.rooms.delete(roomId);
   }
@@ -177,26 +173,18 @@ export class RoomManager {
 
   // --- Timeout management ---
 
-  private startJoinTimeout(roomId: string): void {
+  private startWaitingExpiryTimer(roomId: string): void {
     const room = this.rooms.get(roomId);
     if (!room) return;
 
-    room.timers.join = setTimeout(() => {
-      closeRoom(this.db, roomId, "join_failed");
-      if (room.host) {
-        sendJson(room.host, { type: "ended", reason: "join_failed" });
-      }
-      if (room.guest) {
-        sendJson(room.guest, { type: "ended", reason: "join_failed" });
-      }
-      this.cleanupRoom(roomId);
-      if (room.host) {
-        room.host.close(1000, "join_failed");
-      }
-      if (room.guest) {
-        room.guest.close(1000, "join_failed");
-      }
-    }, this.joinTimeoutMs);
+    const expiresAt = this.getInviteExpiry(roomId);
+    if (!expiresAt) {
+      return;
+    }
+
+    room.timers.expiry = setTimeout(() => {
+      this.expireRoom(roomId);
+    }, Math.max(0, expiresAt.getTime() - Date.now()));
   }
 
   private maybeActivateRoom(roomId: string): void {
@@ -205,8 +193,8 @@ export class RoomManager {
     if (room.isActive || !room.host || !room.guest) return;
 
     room.isActive = true;
-    clearTimeout(room.timers.join);
-    room.timers.join = undefined;
+    clearTimeout(room.timers.expiry);
+    room.timers.expiry = undefined;
     activateRoom(this.db, roomId);
 
     sendJson(room.host, { type: "room_active" });
@@ -239,6 +227,22 @@ export class RoomManager {
       content: openingMessage.content,
       createdAt: openingMessage.created_at,
     });
+  }
+
+  private getInviteExpiry(roomId: string): Date | null {
+    const row = this.db
+      .prepare(
+        `SELECT MIN(expires_at) AS expires_at
+         FROM invites
+         WHERE room_id = ?`,
+      )
+      .get(roomId) as { expires_at: string | null } | null;
+
+    if (!row?.expires_at) {
+      return null;
+    }
+
+    return new Date(row.expires_at);
   }
 
   private expireRoom(roomId: string): void {

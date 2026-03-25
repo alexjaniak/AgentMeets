@@ -161,4 +161,34 @@ describe("browser room presentation", () => {
     expect(room.closed_at).toEqual(expect.any(String));
     expect(room.close_reason).toBeNull();
   });
+
+  test("legacy join path rejects rooms after the invite lifetime elapses", async () => {
+    const baseUrl = `http://localhost:${port}`;
+
+    const createResponse = await fetch(`${baseUrl}/rooms`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        openingMessage: "Legacy join expiry coverage.",
+        inviteTtlSeconds: 1,
+      }),
+    });
+    expect(createResponse.status).toBe(201);
+
+    const created = (await createResponse.json()) as { roomId: string };
+
+    await Bun.sleep(1_100);
+
+    const joinResponse = await fetch(`${baseUrl}/rooms/${created.roomId}/join`, {
+      method: "POST",
+    });
+    expect(joinResponse.status).toBe(410);
+    expect(await joinResponse.json()).toEqual({ error: "room_expired" });
+
+    const room = db
+      .prepare("SELECT status, closed_at FROM rooms WHERE id = ?")
+      .get(created.roomId) as Pick<StoredRoom, "status" | "closed_at">;
+    expect(room.status).toBe("expired");
+    expect(room.closed_at).toEqual(expect.any(String));
+  });
 });

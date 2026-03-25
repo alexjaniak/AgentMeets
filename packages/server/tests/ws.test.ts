@@ -3,6 +3,7 @@ import { Database } from "bun:sqlite";
 import type { Room, Sender, StoredRoom, ServerMessage } from "@agentmeets/shared";
 import { initializeSchema } from "../src/db/schema.js";
 import { createRoom, joinRoom, closeRoom, getRoomByToken } from "../src/db/rooms.js";
+import { createInvite } from "../src/db/invites.js";
 import { RoomManager } from "../src/ws/room-manager.js";
 import { createWebSocketHandlers } from "../src/ws/handler.js";
 import { handleUpgrade } from "../src/ws/upgrade.js";
@@ -366,10 +367,22 @@ describe("WebSocket relay — integration tests", () => {
     expect(msg).toEqual({ type: "ended", reason: "user_ended" });
   });
 
-  test("activation timeout closes the relay with join_failed", async () => {
+  test("waiting rooms expire with reason expired when their invite TTL elapses", async () => {
     const db = createTestDb();
-    setupRoom(db);
-    const roomManager = new RoomManager(db, { joinTimeoutMs: 50 });
+    createRoom(db, "WAIT01", "host-token-waiting", "Opening context", "r_waiting");
+    createInvite(
+      db,
+      "WAIT01",
+      "r_waiting.1",
+      new Date(Date.now() + 50).toISOString(),
+    );
+    createInvite(
+      db,
+      "WAIT01",
+      "r_waiting.2",
+      new Date(Date.now() + 50).toISOString(),
+    );
+    const roomManager = new RoomManager(db);
     const wsHandlers = createWebSocketHandlers(roomManager);
 
     const server = Bun.serve<WsData>({
@@ -387,23 +400,23 @@ describe("WebSocket relay — integration tests", () => {
     });
 
     try {
-      const guestWs = new WebSocket(
-        `ws://localhost:${server.port}/rooms/ROOM01/ws?token=guest-token-456`,
+      const hostWs = new WebSocket(
+        `ws://localhost:${server.port}/rooms/WAIT01/ws?token=host-token-waiting`,
       );
-      await waitForOpen(guestWs);
-      const ended = await waitForMessage(guestWs);
-      expect(ended).toEqual({ type: "ended", reason: "join_failed" });
-      const close = await waitForClose(guestWs);
-      expect(close.reason).toBe("join_failed");
+      await waitForOpen(hostWs);
+      const ended = await waitForMessage(hostWs);
+      expect(ended).toEqual({ type: "ended", reason: "expired" });
+      const close = await waitForClose(hostWs);
+      expect(close.reason).toBe("Room expired");
 
-      const room = db.prepare("SELECT status, close_reason FROM rooms WHERE id = ?").get("ROOM01") as {
+      const room = db.prepare("SELECT status, close_reason FROM rooms WHERE id = ?").get("WAIT01") as {
         status: StoredRoom["status"];
         close_reason: StoredRoom["close_reason"];
       };
-      expect(room.status).toBe("closed");
-      expect(room.close_reason).toBe("join_failed");
+      expect(room.status).toBe("expired");
+      expect(room.close_reason).toBeNull();
     } finally {
-      roomManager.cleanupRoom("ROOM01");
+      roomManager.cleanupRoom("WAIT01");
       server.stop(true);
       db.close();
     }
@@ -534,7 +547,7 @@ describe("WebSocket relay — integration tests", () => {
 });
 
 describe("RoomManager timeouts", () => {
-  test("join timeout exists after host connects", async () => {
+  test("waiting rooms are tracked after the first helper connects", async () => {
     const db = createTestDb();
     setupRoom(db);
     const roomManager = new RoomManager(db);
