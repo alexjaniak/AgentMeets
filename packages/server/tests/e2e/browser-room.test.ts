@@ -191,4 +191,44 @@ describe("browser room presentation", () => {
     expect(room.status).toBe("expired");
     expect(room.closed_at).toEqual(expect.any(String));
   });
+
+  test("legacy join path does not expire an already-claimed room after invite expiry", async () => {
+    const baseUrl = `http://localhost:${port}`;
+
+    const createResponse = await fetch(`${baseUrl}/rooms`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        openingMessage: "Claimed room should stay claim-valid.",
+        inviteTtlSeconds: 1,
+      }),
+    });
+    expect(createResponse.status).toBe(201);
+
+    const created = (await createResponse.json()) as {
+      roomId: string;
+      guestAgentLink: string;
+    };
+    const guestInviteToken = new URL(created.guestAgentLink).pathname.split("/").pop()!;
+
+    const guestClaimResponse = await fetch(`${baseUrl}/invites/${guestInviteToken}/claim`, {
+      method: "POST",
+      headers: { "Idempotency-Key": "legacy-join-claimed-room" },
+    });
+    expect(guestClaimResponse.status).toBe(200);
+
+    await Bun.sleep(1_100);
+
+    const joinResponse = await fetch(`${baseUrl}/rooms/${created.roomId}/join`, {
+      method: "POST",
+    });
+    expect(joinResponse.status).toBe(409);
+    expect(await joinResponse.json()).toEqual({ error: "room_full" });
+
+    const room = db
+      .prepare("SELECT status, guest_token FROM rooms WHERE id = ?")
+      .get(created.roomId) as Pick<StoredRoom, "status" | "guest_token">;
+    expect(room.status).toBe("waiting");
+    expect(room.guest_token).toEqual(expect.any(String));
+  });
 });

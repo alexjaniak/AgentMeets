@@ -210,7 +210,8 @@ export class RoomManager {
 
     sendJson(room.host, { type: "room_active" });
     sendJson(room.guest, { type: "room_active" });
-    this.replayPendingMessages(roomId, room.guest);
+    this.replayPendingMessages(roomId, "host", room.guest);
+    this.replayPendingMessages(roomId, "guest", room.host);
 
     this.resetIdleTimeout(roomId);
   }
@@ -225,15 +226,19 @@ export class RoomManager {
     }, this.idleTimeoutMs);
   }
 
-  private replayPendingMessages(roomId: string, guest: ServerWebSocket<WsData>): void {
+  private replayPendingMessages(
+    roomId: string,
+    sender: Sender,
+    recipient: ServerWebSocket<WsData>,
+  ): void {
     const pendingMessages = getMessages(this.db, roomId).filter(
-      (message) => message.sender === "host",
+      (message) => message.sender === sender,
     );
     for (const message of pendingMessages) {
-      sendJson(guest, {
+      sendJson(recipient, {
         type: "message",
         messageId: message.id,
-        sender: "host",
+        sender,
         clientMessageId: `persisted:${message.id}`,
         replyToMessageId: null,
         content: message.content,

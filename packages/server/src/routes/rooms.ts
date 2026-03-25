@@ -112,12 +112,12 @@ export function roomRoutes(db: Database): Hono {
     if (room.status === "expired" || room.status === "closed") {
       return c.json({ error: "room_expired" }, 410);
     }
+    if (room.guest_token !== null) {
+      return c.json({ error: "room_full" }, 409);
+    }
     if (hasInviteExpired(db, id)) {
       expireRoom(db, id);
       return c.json({ error: "room_expired" }, 410);
-    }
-    if (room.guest_token !== null) {
-      return c.json({ error: "room_full" }, 409);
     }
 
     const guestToken = generateToken();

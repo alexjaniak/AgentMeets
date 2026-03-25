@@ -45,6 +45,27 @@ function waitForMessage(ws: WebSocket): Promise<ServerMessage> {
   });
 }
 
+function waitForMessages(ws: WebSocket, count: number): Promise<ServerMessage[]> {
+  return new Promise((resolve, reject) => {
+    const messages: ServerMessage[] = [];
+    const timeout = setTimeout(() => {
+      ws.removeEventListener("message", onMessage);
+      reject(new Error("Timeout waiting for messages"));
+    }, 5000);
+
+    const onMessage = (event: MessageEvent) => {
+      messages.push(JSON.parse(event.data as string) as ServerMessage);
+      if (messages.length === count) {
+        clearTimeout(timeout);
+        ws.removeEventListener("message", onMessage);
+        resolve(messages);
+      }
+    };
+
+    ws.addEventListener("message", onMessage);
+  });
+}
+
 function waitForClose(ws: WebSocket): Promise<{ code: number; reason: string }> {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error("Timeout waiting for close")), 5000);
@@ -262,6 +283,59 @@ describe("WebSocket relay — integration tests", () => {
       type: "message",
       sender: "host",
       content: "Additional context before you join.",
+    });
+
+    roomManager.cleanupRoom(roomId);
+    hostWs.close();
+    guestWs.close();
+  });
+
+  test("host receives guest messages that were accepted before activation when guest connects first", async () => {
+    const roomId = "ROOM04";
+    createRoom(db, roomId, "host-token-791", "Opening context.");
+    db.prepare("UPDATE rooms SET guest_token = ? WHERE id = ?").run(
+      "guest-token-989",
+      roomId,
+    );
+
+    const guestWs = connectAs("guest-token-989", roomId);
+    await waitForOpen(guestWs);
+
+    const guestAckPromise = waitForMessage(guestWs);
+    guestWs.send(
+      JSON.stringify({
+        type: "message",
+        clientMessageId: "prejoin-guest-1",
+        replyToMessageId: null,
+        content: "Guest context before the host arrives.",
+      }),
+    );
+
+    expect(await guestAckPromise).toMatchObject({
+      type: "ack",
+      clientMessageId: "prejoin-guest-1",
+    });
+
+    const guestMessagesPromise = waitForMessages(guestWs, 2);
+    const hostWs = connectAs("host-token-791", roomId);
+    const hostMessagesPromise = waitForMessages(hostWs, 2);
+    await waitForOpen(hostWs);
+
+    const [hostMessages, guestMessages] = await Promise.all([
+      hostMessagesPromise,
+      guestMessagesPromise,
+    ]);
+    expect(hostMessages[0]).toEqual({ type: "room_active" });
+    expect(hostMessages[1]).toMatchObject({
+      type: "message",
+      sender: "guest",
+      content: "Guest context before the host arrives.",
+    });
+    expect(guestMessages[0]).toEqual({ type: "room_active" });
+    expect(guestMessages[1]).toMatchObject({
+      type: "message",
+      sender: "host",
+      content: "Opening context.",
     });
 
     roomManager.cleanupRoom(roomId);
