@@ -40,7 +40,7 @@ describe("POST /rooms", () => {
     expect(body.error).toBe("invalid_opening_message");
   });
 
-  test("returns 201 with roomId, hostToken, and absolute inviteUrl", async () => {
+  test("returns 201 with paired participant links from the same room stem", async () => {
     const res = await app.request("http://agentmeets.test/rooms", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -48,11 +48,18 @@ describe("POST /rooms", () => {
     });
     expect(res.status).toBe(201);
     const body = await res.json();
-    expect(body.roomId).toMatch(/^[A-Z0-9]{6}$/);
-    expect(body.hostToken).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
-    );
-    expect(body.inviteUrl).toMatch(/^http:\/\/agentmeets\.test\/j\/[A-Za-z0-9_-]+$/);
+    expect(body).toEqual({
+      roomId: expect.stringMatching(/^[A-Z0-9]{6}$/),
+      roomStem: expect.stringMatching(/^r_[A-Za-z0-9_-]+$/),
+      hostAgentLink: expect.stringMatching(
+        /^http:\/\/agentmeets\.test\/j\/r_[A-Za-z0-9_-]+\.1$/,
+      ),
+      guestAgentLink: expect.stringMatching(
+        /^http:\/\/agentmeets\.test\/j\/r_[A-Za-z0-9_-]+\.2$/,
+      ),
+      inviteExpiresAt: expect.any(String),
+      status: "waiting_for_join",
+    });
   });
 
   test("creates room with the opening message persisted as the first host message", async () => {
@@ -100,14 +107,17 @@ describe("POST /rooms", () => {
 
     expect(res.status).toBe(201);
     const body = await res.json();
-    const invite = db
-      .prepare("SELECT expires_at FROM invites WHERE room_id = ?")
-      .get(body.roomId) as { expires_at: string };
+    const invites = db
+      .prepare("SELECT participant_role, expires_at FROM invites WHERE room_id = ? ORDER BY participant_role ASC")
+      .all(body.roomId) as Array<{ participant_role: string; expires_at: string }>;
 
-    expect(new Date(invite.expires_at).getTime()).toBeGreaterThanOrEqual(
+    expect(invites).toHaveLength(2);
+    expect(invites[0].participant_role).toBe("guest");
+    expect(invites[1].participant_role).toBe("host");
+    expect(new Date(invites[0].expires_at).getTime()).toBeGreaterThanOrEqual(
       before + 900_000,
     );
-    expect(new Date(invite.expires_at).getTime()).toBeLessThanOrEqual(
+    expect(new Date(invites[1].expires_at).getTime()).toBeLessThanOrEqual(
       after + 900_000,
     );
   });

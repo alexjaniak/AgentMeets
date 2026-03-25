@@ -7,7 +7,21 @@ export function inviteRoutes(db: Database): Hono {
 
   router.get("/j/:inviteToken", (c) => {
     try {
-      return c.json(getInviteManifest(db, c.req.param("inviteToken")), 200);
+      const inviteToken = c.req.param("inviteToken");
+      const manifest = getInviteManifest(db, inviteToken);
+      const parsedToken = parseParticipantInviteToken(inviteToken);
+
+      return c.json(
+        {
+          roomId: manifest.roomId,
+          roomStem: parsedToken.roomStem,
+          role: parsedToken.role,
+          status: manifest.status,
+          openingMessage: manifest.openingMessage,
+          expiresAt: manifest.expiresAt,
+        },
+        200,
+      );
     } catch (error) {
       if (error instanceof InviteError) {
         return c.json({ error: error.code }, error.status);
@@ -23,8 +37,14 @@ export function inviteRoutes(db: Database): Hono {
     }
 
     try {
+      const result = claimInvite(db, c.req.param("inviteToken"), idempotencyKey);
       return c.json(
-        claimInvite(db, c.req.param("inviteToken"), idempotencyKey),
+        {
+          roomId: result.roomId,
+          role: result.role,
+          sessionToken: result.sessionToken,
+          status: result.status,
+        },
         200,
       );
     } catch (error) {
@@ -36,4 +56,21 @@ export function inviteRoutes(db: Database): Hono {
   });
 
   return router;
+}
+
+function parseParticipantInviteToken(
+  inviteToken: string,
+): { roomStem: string; role: "host" | "guest" } {
+  const match = inviteToken.match(/^(r_[A-Za-z0-9_-]+)\.(1|2)$/);
+  if (match) {
+    return {
+      roomStem: match[1],
+      role: match[2] === "1" ? "host" : "guest",
+    };
+  }
+
+  return {
+    roomStem: inviteToken,
+    role: "guest",
+  };
 }

@@ -109,88 +109,107 @@ describe("invite flow", () => {
     const created = await createResponse.json();
     expect(created).toEqual({
       roomId: expect.stringMatching(/^[A-Z0-9]{6}$/),
-      hostToken: expect.stringMatching(
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+      roomStem: expect.stringMatching(/^r_[A-Za-z0-9_-]+$/),
+      hostAgentLink: expect.stringMatching(
+        new RegExp(`^http://localhost:${port}/j/r_[A-Za-z0-9_-]+\\.1$`),
       ),
-      inviteUrl: expect.stringMatching(
-        new RegExp(`^http://localhost:${port}/j/[A-Za-z0-9_-]+$`),
+      guestAgentLink: expect.stringMatching(
+        new RegExp(`^http://localhost:${port}/j/r_[A-Za-z0-9_-]+\\.2$`),
       ),
+      inviteExpiresAt: expect.any(String),
+      status: "waiting_for_join",
     });
 
-    const inviteToken = new URL(created.inviteUrl).pathname.split("/").pop()!;
+    const hostInviteToken = new URL(created.hostAgentLink).pathname.split("/").pop()!;
+    const guestInviteToken = new URL(created.guestAgentLink).pathname.split("/").pop()!;
 
-    const manifestBeforeClaim = await fetch(`${baseUrl}/j/${inviteToken}`);
+    const manifestBeforeClaim = await fetch(`${baseUrl}/j/${hostInviteToken}`);
     expect(manifestBeforeClaim.status).toBe(200);
     expect(await manifestBeforeClaim.json()).toEqual({
       roomId: created.roomId,
+      roomStem: created.roomStem,
+      role: "host",
       status: "waiting_for_join",
       openingMessage: "Let's debug the release pipeline.",
       expiresAt: expect.any(String),
     });
 
-    const claimResponse = await fetch(`${baseUrl}/invites/${inviteToken}/claim`, {
+    const hostClaimResponse = await fetch(`${baseUrl}/invites/${hostInviteToken}/claim`, {
       method: "POST",
-      headers: { "Idempotency-Key": "invite-flow-claim" },
+      headers: { "Idempotency-Key": "invite-flow-host-claim" },
     });
-    expect(claimResponse.status).toBe(200);
-    const claim = await claimResponse.json();
-    expect(claim).toEqual({
+    expect(hostClaimResponse.status).toBe(200);
+    const hostClaim = await hostClaimResponse.json();
+    expect(hostClaim).toEqual({
       roomId: created.roomId,
-      guestToken: expect.any(String),
+      role: "host",
+      sessionToken: expect.any(String),
       status: "activating",
     });
 
-    const manifestAfterClaim = await fetch(`${baseUrl}/j/${inviteToken}`);
-    expect(manifestAfterClaim.status).toBe(200);
-    expect(await manifestAfterClaim.json()).toEqual({
+    const guestClaimResponse = await fetch(`${baseUrl}/invites/${guestInviteToken}/claim`, {
+      method: "POST",
+      headers: { "Idempotency-Key": "invite-flow-guest-claim" },
+    });
+    expect(guestClaimResponse.status).toBe(200);
+    const guestClaim = await guestClaimResponse.json();
+    expect(guestClaim).toEqual({
       roomId: created.roomId,
+      role: "guest",
+      sessionToken: expect.any(String),
       status: "activating",
-      openingMessage: "Let's debug the release pipeline.",
-      expiresAt: expect.any(String),
     });
 
     const roomRow = db
-      .prepare("SELECT guest_token, joined_at, status FROM rooms WHERE id = ?")
+      .prepare("SELECT room_stem, host_token, guest_token, joined_at, status FROM rooms WHERE id = ?")
       .get(created.roomId) as {
+      room_stem: string | null;
+      host_token: string | null;
       guest_token: string | null;
       joined_at: string | null;
       status: string;
     };
-    expect(roomRow.guest_token).toBe(claim.guestToken);
+    expect(roomRow.room_stem).toBe(created.roomStem);
+    expect(roomRow.host_token).toBe(hostClaim.sessionToken);
+    expect(roomRow.guest_token).toBe(guestClaim.sessionToken);
     expect(roomRow.joined_at).toBeNull();
     expect(roomRow.status).toBe("waiting");
 
     const hostWs = new WebSocket(
-      `ws://localhost:${port}/rooms/${created.roomId}/ws?token=${created.hostToken}`,
+      `ws://localhost:${port}/rooms/${created.roomId}/ws?token=${hostClaim.sessionToken}`,
     );
     await waitForOpen(hostWs);
 
     const hostActivationPromise = waitForMessage(hostWs);
     const guestWs = new WebSocket(
-      `ws://localhost:${port}/rooms/${created.roomId}/ws?token=${claim.guestToken}`,
+      `ws://localhost:${port}/rooms/${created.roomId}/ws?token=${guestClaim.sessionToken}`,
     );
     await waitForOpen(guestWs);
 
     expect(await hostActivationPromise).toEqual({ type: "room_active" });
     expect(await waitForMessage(guestWs)).toEqual({ type: "room_active" });
 
-    const manifestAfterActivation = await fetch(`${baseUrl}/j/${inviteToken}`);
+    const manifestAfterActivation = await fetch(`${baseUrl}/j/${guestInviteToken}`);
     expect(manifestAfterActivation.status).toBe(200);
     expect(await manifestAfterActivation.json()).toEqual({
       roomId: created.roomId,
+      roomStem: created.roomStem,
+      role: "guest",
       status: "active",
       openingMessage: "Let's debug the release pipeline.",
       expiresAt: expect.any(String),
     });
 
     const activatedRoomRow = db
-      .prepare("SELECT guest_token, joined_at, status FROM rooms WHERE id = ?")
+      .prepare("SELECT host_token, guest_token, joined_at, status FROM rooms WHERE id = ?")
       .get(created.roomId) as {
+      host_token: string | null;
       guest_token: string | null;
       joined_at: string | null;
       status: string;
     };
-    expect(activatedRoomRow.guest_token).toBe(claim.guestToken);
+    expect(activatedRoomRow.host_token).toBe(hostClaim.sessionToken);
+    expect(activatedRoomRow.guest_token).toBe(guestClaim.sessionToken);
     expect(activatedRoomRow.joined_at).toEqual(expect.any(String));
     expect(activatedRoomRow.status).toBe("active");
 
@@ -218,16 +237,17 @@ describe("invite flow", () => {
 
     const created = (await createResponse.json()) as {
       roomId: string;
-      inviteUrl: string;
+      hostAgentLink: string;
+      guestAgentLink: string;
     };
-    const inviteToken = new URL(created.inviteUrl).pathname.split("/").pop()!;
+    const guestInviteToken = new URL(created.guestAgentLink).pathname.split("/").pop()!;
 
     db.prepare("UPDATE invites SET expires_at = ? WHERE room_id = ?").run(
       new Date(Date.now() - 60_000).toISOString(),
       created.roomId,
     );
 
-    const expiredManifest = await fetch(`${baseUrl}/j/${inviteToken}`);
+    const expiredManifest = await fetch(`${baseUrl}/j/${guestInviteToken}`);
     expect(expiredManifest.status).toBe(410);
     expect(expiredManifest.headers.get("content-type")).toContain("application/json");
     expect(expiredManifest.headers.get("location")).toBeNull();
@@ -235,7 +255,7 @@ describe("invite flow", () => {
       error: "invite_expired",
     });
 
-    const expiredClaim = await fetch(`${baseUrl}/invites/${inviteToken}/claim`, {
+    const expiredClaim = await fetch(`${baseUrl}/invites/${guestInviteToken}/claim`, {
       method: "POST",
       headers: { "Idempotency-Key": "expired-bootstrap-claim" },
     });

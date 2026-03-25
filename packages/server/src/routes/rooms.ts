@@ -12,20 +12,22 @@ import { rateLimiter } from "../middleware/rate-limit.js";
 
 const ROOM_ID_PATTERN = /^[A-Z0-9]{6}$/;
 const MAX_COLLISION_RETRIES = 3;
+const DEFAULT_INVITE_TTL_MS = 5 * 60 * 1000;
+const ROOM_STEM_PREFIX = "r_";
 
 export function roomRoutes(db: Database): Hono {
   const router = new Hono();
-  const createRoomWithInvite = db.transaction(
+  const createRoomWithInvites = db.transaction(
     (
       roomId: string,
+      roomStem: string,
       hostToken: string,
       openingMessage: string,
-      inviteToken: string,
-      inviteExpiresAt?: string,
+      inviteExpiresAt: string,
     ) => {
-      const room = createRoom(db, roomId, hostToken, openingMessage);
-      const invite = issueInvite(db, roomId, inviteToken, inviteExpiresAt);
-      return { room, invite };
+      createRoom(db, roomId, hostToken, openingMessage, roomStem);
+      issueInvite(db, roomId, `${roomStem}.1`, inviteExpiresAt);
+      issueInvite(db, roomId, `${roomStem}.2`, inviteExpiresAt);
     },
   );
 
@@ -55,23 +57,32 @@ export function roomRoutes(db: Database): Hono {
     const inviteExpiresAt =
       typeof body.inviteTtlSeconds === "number"
         ? new Date(Date.now() + body.inviteTtlSeconds * 1000).toISOString()
-        : undefined;
+        : new Date(Date.now() + DEFAULT_INVITE_TTL_MS).toISOString();
 
     let lastError: unknown;
     for (let attempt = 0; attempt < MAX_COLLISION_RETRIES; attempt++) {
       const roomId = generateRoomId();
+      const roomStem = generateRoomStem();
       const hostToken = generateToken();
-      const inviteToken = generateToken();
       try {
-        createRoomWithInvite(
+        createRoomWithInvites(
           roomId,
+          roomStem,
           hostToken,
           openingMessage,
-          inviteToken,
           inviteExpiresAt,
         );
-        const inviteUrl = new URL(`/j/${inviteToken}`, c.req.url).toString();
-        return c.json({ roomId, hostToken, inviteUrl }, 201);
+        return c.json(
+          {
+            roomId,
+            roomStem,
+            hostAgentLink: new URL(`/j/${roomStem}.1`, c.req.url).toString(),
+            guestAgentLink: new URL(`/j/${roomStem}.2`, c.req.url).toString(),
+            inviteExpiresAt,
+            status: "waiting_for_join",
+          },
+          201,
+        );
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
         if (msg.includes("UNIQUE constraint failed") || msg.includes("PRIMARY KEY")) {
@@ -110,4 +121,8 @@ export function roomRoutes(db: Database): Hono {
   });
 
   return router;
+}
+
+function generateRoomStem(): string {
+  return `${ROOM_STEM_PREFIX}${generateToken().replaceAll("-", "")}`;
 }
