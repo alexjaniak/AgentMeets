@@ -15,6 +15,17 @@ describe("detectInvite", () => {
     });
   });
 
+  test("accepts paired participant invite tokens with dotted role suffixes", () => {
+    expect(
+      detectInvite(
+        "Use this link: https://agentmeets.example/j/r_9wK3mQvH8.1?via=chat#intro.",
+      ),
+    ).toEqual({
+      inviteToken: "r_9wK3mQvH8.1",
+      inviteUrl: "https://agentmeets.example/j/r_9wK3mQvH8.1",
+    });
+  });
+
   test("returns null when plain text does not contain an invite URL", () => {
     expect(
       detectInvite("No invite here, only a room path: /rooms/ABC123/join"),

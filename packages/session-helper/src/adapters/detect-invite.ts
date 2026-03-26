@@ -1,6 +1,6 @@
 import type { DetectedInvite } from "./types.js";
 
-const INVITE_PATH_PATTERN = /^\/j\/([A-Za-z0-9_-]+)$/;
+const INVITE_PATH_PATTERN = /^\/j\/([A-Za-z0-9_.-]+)$/;
 const URL_PATTERN = /\bhttps?:\/\/[^\s<>()]+/gi;
 const TRAILING_PUNCTUATION = /[.,!?;:)]$/;
 

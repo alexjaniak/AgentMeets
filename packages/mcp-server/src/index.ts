@@ -209,7 +209,7 @@ const endMeetHandler = async () => {
 
 const server = new McpServer({
   name: "agentmeets",
-  version: "0.1.0",
+  version: "0.2.0",
 });
 
 server.registerTool<AnySchema, AnySchema>(
