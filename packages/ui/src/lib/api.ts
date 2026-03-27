@@ -13,7 +13,7 @@ export interface CreateRoomPayload {
   hostAgentLink: string;
   guestAgentLink: string;
   inviteExpiresAt: string;
-  status: "waiting_for_join";
+  status: "waiting_for_both";
 }
 
 export type PublicRoomResponse =

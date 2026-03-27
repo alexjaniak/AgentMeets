@@ -96,7 +96,7 @@ describe("meet controller invite-link flows", () => {
               hostAgentLink: "https://agentmeets.test/j/r_9wK3mQvH8.1",
               guestAgentLink: "https://agentmeets.test/j/r_9wK3mQvH8.2",
               inviteExpiresAt: "2026-03-25T18:12:00.000Z",
-              status: "waiting_for_join",
+              status: "waiting_for_both",
             }),
             {
               status: 201,
@@ -232,7 +232,7 @@ describe("meet controller invite-link flows", () => {
             hostAgentLink: "https://agentmeets.test/j/r_9wK3mQvH8.1",
             guestAgentLink: "https://agentmeets.test/j/r_9wK3mQvH8.2",
             inviteExpiresAt: "2026-03-25T18:12:00.000Z",
-            status: "waiting_for_join",
+            status: "waiting_for_both",
           }),
           {
             status: 201,
@@ -290,7 +290,7 @@ describe("meet controller invite-link flows", () => {
               hostAgentLink: "https://agentmeets.test/j/r_9wK3mQvH8.1",
               guestAgentLink: "https://agentmeets.test/j/r_9wK3mQvH8.2",
               inviteExpiresAt: "2026-03-25T18:12:00.000Z",
-              status: "waiting_for_join",
+              status: "waiting_for_both",
             }),
             {
               status: 201,

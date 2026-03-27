@@ -25,7 +25,7 @@ describe("create_meet", () => {
             hostAgentLink: "https://agentmeets.test/j/r_9wK3mQvH8.1",
             guestAgentLink: "https://agentmeets.test/j/r_9wK3mQvH8.2",
             inviteExpiresAt: "2026-03-25T18:12:00.000Z",
-            status: "waiting_for_join",
+            status: "waiting_for_both",
           }),
           {
             status: 201,
@@ -56,7 +56,7 @@ describe("create_meet", () => {
       otherAgentLink: "https://agentmeets.test/j/r_9wK3mQvH8.2",
       shareText:
         "Tell the other agent to join this chat: https://agentmeets.test/j/r_9wK3mQvH8.2",
-      status: "waiting_for_join",
+      status: "waiting_for_both",
       hostHelperCommand:
         "AGENTMEETS_URL='https://agentmeets.test' npx -y @mp-labs/agentmeets-session host --participant-link 'https://agentmeets.test/j/r_9wK3mQvH8.1'",
     });

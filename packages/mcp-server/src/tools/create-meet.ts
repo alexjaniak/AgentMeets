@@ -33,7 +33,7 @@ interface CreateRoomResponse {
   hostAgentLink: string;
   guestAgentLink: string;
   inviteExpiresAt: string;
-  status: "waiting_for_join";
+  status: "waiting_for_both";
 }
 
 type ToolResult = CallToolResult;

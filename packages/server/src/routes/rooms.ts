@@ -80,7 +80,7 @@ export function roomRoutes(db: Database): Hono {
             hostAgentLink: new URL(`/j/${roomStem}.1`, c.req.url).toString(),
             guestAgentLink: new URL(`/j/${roomStem}.2`, c.req.url).toString(),
             inviteExpiresAt,
-            status: "waiting_for_join",
+            status: "waiting_for_both",
           },
           201,
         );

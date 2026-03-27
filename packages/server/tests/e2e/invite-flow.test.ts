@@ -118,7 +118,7 @@ describe("invite flow", () => {
         new RegExp(`^http://localhost:${port}/j/r_[A-Za-z0-9_-]+\\.2$`),
       ),
       inviteExpiresAt: expect.any(String),
-      status: "waiting_for_join",
+      status: "waiting_for_both",
     });
 
     const hostInviteToken = new URL(created.hostAgentLink).pathname.split("/").pop()!;
