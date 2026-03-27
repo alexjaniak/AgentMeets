@@ -37,7 +37,7 @@ Standard user-facing identity primitive:
 ## Goals
 
 - Support room creation from both CLI and browser UI.
-- Require an opening message before a room can be created.
+- Require a non-empty opening message before a room can be created.
 - Persist the opening message immediately at room creation time.
 - Treat the persisted opening message as the canonical first host message.
 - Return exactly two role-scoped invite links: one for the host session and one for the guest session.
@@ -113,6 +113,7 @@ The opening message is required in both creation pathways.
 
 Rules:
 - it is persisted immediately when the room is created
+- empty or whitespace-only opening messages are rejected in both CLI and browser creation flows
 - it is stored as the canonical first host message
 - it is replayed to the guest as soon as the guest session joins
 - it is rendered to the host session as part of room history when the host session attaches so both sides see the same first-message origin
@@ -259,6 +260,8 @@ Pre-activation first-reply rule:
 - if the guest joins before the host session has attached, the guest still sees the persisted opening message immediately
 - the guest may draft immediately
 - outbound delivery does not occur until the room becomes `active`
+- if `/send` is used before activation, the current pending reply becomes the single staged outbound for that message and waits for activation
+- if `/send` is used again before activation for the same pending message, it replaces the earlier staged outbound with the latest `workingDraft`
 - once `active`, any locally staged first reply proceeds through the normal send/ack flow
 
 The browser has no role in the actual chat once the room is created.
@@ -347,11 +350,14 @@ Invite-link browser landing behavior:
 - opening a host or guest invite link in a browser must not create a browser chat experience
 - the browser may show a thin informational/status view only
 - that view may show the invite instruction and status, but must not show join, send, or transcript affordances
+- that view must explicitly tell the user to paste the invite into an existing Claude Code or Codex session
+- that view must explicitly state that the browser cannot join the room
 
 Expiry handling:
 - the browser status view should refresh automatically while the room is unresolved
 - the view should show that the room is still waiting and that expiry is time-bounded
 - once the room becomes `expired`, copy actions are disabled and replaced with a create-new-room recovery action
+- if expiry happens before activation while a draft is staged locally, the draft remains locally visible for copy/recovery, is marked unsent, and send controls stay disabled for that expired room
 
 ## Server/API Direction
 
@@ -372,6 +378,7 @@ This work is done when all of the following are true:
 
 - CLI room creation and browser room creation produce the same room semantics.
 - Browser UI requires an opening message and shows the two copy-ready instructions plus status only.
+- Browser and CLI creation both reject empty or whitespace-only opening messages.
 - Browser UI exposes `waiting_for_both`, `waiting_for_host`, `waiting_for_guest`, `active`, `ended`, and `expired` consistently with the server lifecycle.
 - Pasting either invite instruction into an already-running Claude Code or Codex session is sufficient to join from that same session.
 - Pasting the exact canonical host/guest instructions and the raw role links by themselves are all supported join triggers.
@@ -386,6 +393,7 @@ This work is done when all of the following are true:
 - The host also sees the persisted opening message exactly once in room history when the host session attaches.
 - If the guest joins before the host, the guest may draft immediately and outbound delivery waits until activation.
 - If the guest stages a reply before activation, local UX makes it clear that delivery is waiting on activation.
+- If `/send` is used before activation, exactly one staged outbound is retained for that pending message and delivers only after activation.
 - Replies auto-send after 5 seconds unless interrupted with `e`.
 - Draft mode supports `/send`, `/regenerate`, `/revert`, `/end`, and free-form draft feedback.
 - `/send` is immediate and ack-gated; `/regenerate` preserves `originalDraft` and stays in manual mode.
@@ -397,9 +405,11 @@ This work is done when all of the following are true:
 - Standard CLI/browser launcher outputs expose only the two invite instructions plus room identity/status in the normal flow.
 - Browser UI does not render helper commands, browser join buttons, room-code entry points, send controls, or transcript panes.
 - Opening an invite link in a browser shows only a thin informational/status view, never browser join/send/transcript controls.
+- Invite-link browser landings explicitly tell the user to paste the invite into an existing Claude Code or Codex session and explicitly state that the browser cannot join the room.
 - Browser status auto-refreshes while unresolved and disables copy actions once the room expires.
 - Standard user-facing success and failure UX does not advertise manual helper commands.
 - Local success, waiting, staged-pre-activation, failure, and hold states are shown via helper-rendered AgentMeets status/control surfaces rather than assistant-authored prose.
+- If expiry happens before activation while a draft is staged locally, the draft remains locally visible but cannot be sent into the expired room.
 
 ## Recommended Implementation Slices
 
