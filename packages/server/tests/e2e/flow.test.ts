@@ -1,9 +1,13 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Database } from "bun:sqlite";
 import { createTestDatabase, TestAgent, JoinError } from "./helpers.js";
-import { getRoom } from "../../src/db/rooms.js";
+import { createRoom, getRoom } from "../../src/db/rooms.js";
 import { getMessages } from "../../src/db/messages.js";
 import { expireRoom } from "../../src/db/rooms.js";
+import {
+  createSessionAdapter,
+  type SessionAdapterName,
+} from "../../../session-helper/src/cli.js";
 
 let db: Database;
 
@@ -14,6 +18,18 @@ beforeEach(() => {
 afterEach(() => {
   db.close();
 });
+
+function createAdapterHarness(adapterName: SessionAdapterName) {
+  const writes: string[] = [];
+  const adapter = createSessionAdapter({
+    adapterName,
+    writeToPty(chunk) {
+      writes.push(String(chunk));
+    },
+  });
+
+  return { adapter, writes };
+}
 
 describe("happy path — full conversation", () => {
   test("create → join → exchange messages → end", async () => {
@@ -63,16 +79,146 @@ describe("happy path — full conversation", () => {
     // 9. Agent A sees the room is ended
     const statusA = agentA.getReply();
     expect(statusA.status).toBe("ended");
-    expect(statusA.reason).toBe("closed");
+    expect(statusA.reason).toBe("user_ended");
 
     // Verify room is closed in DB
     const roomFinal = getRoom(db, roomId)!;
     expect(roomFinal.status).toBe("closed");
-    expect(roomFinal.close_reason).toBe("closed");
+    expect(roomFinal.close_reason).toBe("user_ended");
+  });
+});
+
+describe("mixed-client helper integration", () => {
+  test("Claude Code host + Codex guest preserve native prompt formatting on both sides", async () => {
+    const host = createAdapterHarness("claude-code");
+    const guest = createAdapterHarness("codex");
+
+    await guest.adapter.injectRemoteMessage({
+      remoteRole: "host",
+      content: "Opening context from the Claude host.",
+    });
+    await host.adapter.injectRemoteMessage({
+      remoteRole: "guest",
+      content: "Reply from the Codex guest.",
+    });
+
+    expect(guest.writes).toEqual([
+      [
+        "[agentmeets codex remote-message]",
+        "remote_role=host",
+        "draft_command=/draft <message>",
+        "---",
+        "Opening context from the Claude host.",
+        "",
+      ].join("\n"),
+    ]);
+
+    expect(host.writes).toEqual([
+      [
+        "[agentmeets remote-message]",
+        "remote-role: guest",
+        "message:",
+        "Reply from the Codex guest.",
+        "submit-final-draft: /draft <message>",
+        "",
+      ].join("\n"),
+    ]);
+  });
+
+  test("Codex host + Claude Code guest preserve native prompt formatting on both sides", async () => {
+    const host = createAdapterHarness("codex");
+    const guest = createAdapterHarness("claude-code");
+
+    await guest.adapter.injectRemoteMessage({
+      remoteRole: "host",
+      content: "Opening context from the Codex host.",
+    });
+    await host.adapter.injectRemoteMessage({
+      remoteRole: "guest",
+      content: "Reply from the Claude guest.",
+    });
+
+    expect(guest.writes).toEqual([
+      [
+        "[agentmeets remote-message]",
+        "remote-role: host",
+        "message:",
+        "Opening context from the Codex host.",
+        "submit-final-draft: /draft <message>",
+        "",
+      ].join("\n"),
+    ]);
+
+    expect(host.writes).toEqual([
+      [
+        "[agentmeets codex remote-message]",
+        "remote_role=guest",
+        "draft_command=/draft <message>",
+        "---",
+        "Reply from the Claude guest.",
+        "",
+      ].join("\n"),
+    ]);
+  });
+
+  test("draft mode keeps the same regenerate/end semantics on both clients", async () => {
+    for (const adapterName of ["claude-code", "codex"] as const) {
+      const { adapter, writes } = createAdapterHarness(adapterName);
+
+      await adapter.enterDraftMode({
+        originalDraft: "Initial shared draft.",
+        workingDraft: "Initial shared draft.",
+      });
+
+      expect(adapter.routeDraftCommand("/regenerate")).toEqual({
+        kind: "regenerate_draft",
+        originalDraft: "Initial shared draft.",
+        workingDraft: "Initial shared draft.",
+      });
+
+      await adapter.enterDraftMode({
+        originalDraft: "This replacement must be ignored.",
+        workingDraft: "Tighter second pass.",
+      });
+
+      expect(adapter.routeDraftCommand("/regenerate")).toEqual({
+        kind: "regenerate_draft",
+        originalDraft: "Initial shared draft.",
+        workingDraft: "Tighter second pass.",
+      });
+      expect(adapter.routeDraftCommand("/end")).toEqual({
+        kind: "end_session",
+      });
+
+      expect(writes[0]).toContain("/regenerate");
+      expect(writes[0]).toContain("/end");
+      expect(writes[0]).toContain("Initial shared draft.");
+      expect(writes[1]).toContain("Initial shared draft.");
+      expect(writes[1]).toContain("Tighter second pass.");
+    }
   });
 });
 
 describe("room expiry", () => {
+  test("accepted messages update last_activity_at", async () => {
+    const agentA = new TestAgent(db);
+    const agentB = new TestAgent(db);
+    const { roomId } = await agentA.createMeet();
+    await agentB.joinMeet(roomId);
+
+    const staleActivity = "2000-03-24 12:00:00";
+    db.prepare("UPDATE rooms SET last_activity_at = ? WHERE id = ?").run(staleActivity, roomId);
+
+    await agentA.sendAndWait("Still there?");
+
+    const room = db
+      .prepare("SELECT last_activity_at FROM rooms WHERE id = ?")
+      .get(roomId) as { last_activity_at: string | null };
+    expect(room.last_activity_at).toEqual(expect.any(String));
+    expect(room.last_activity_at).not.toBe(staleActivity);
+    expect(Date.parse(room.last_activity_at!)).toBeGreaterThan(Date.parse(staleActivity));
+  });
+
   test("room expires when no one joins within timeout", async () => {
     const agentA = new TestAgent(db);
     const { roomId } = await agentA.createMeet();
@@ -140,12 +286,12 @@ describe("end from host side", () => {
     // Guest checks status
     const guestStatus = agentB.getReply();
     expect(guestStatus.status).toBe("ended");
-    expect(guestStatus.reason).toBe("closed");
+    expect(guestStatus.reason).toBe("user_ended");
 
     // Verify DB state
     const room = getRoom(db, roomId)!;
     expect(room.status).toBe("closed");
-    expect(room.close_reason).toBe("closed");
+    expect(room.close_reason).toBe("user_ended");
   });
 });
 
@@ -167,7 +313,7 @@ describe("end from guest side", () => {
     // Host checks status
     const hostStatus = agentA.getReply();
     expect(hostStatus.status).toBe("ended");
-    expect(hostStatus.reason).toBe("closed");
+    expect(hostStatus.reason).toBe("user_ended");
   });
 });
 
@@ -206,6 +352,20 @@ describe("invalid room code", () => {
 });
 
 describe("message persistence verification", () => {
+  test("opening message is persisted for later guest replay", () => {
+    const room = createRoom(db, "OPEN01", "host-token-1", "Opening context");
+    const messages = getMessages(db, room.id);
+
+    expect(room.opening_message_id).toEqual(expect.any(Number));
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({
+      id: room.opening_message_id,
+      room_id: room.id,
+      sender: "host",
+      content: "Opening context",
+    });
+  });
+
   test("messages are persisted in SQLite in order", async () => {
     const agentA = new TestAgent(db);
     const agentB = new TestAgent(db);
@@ -334,6 +494,6 @@ describe("edge cases", () => {
     room = getRoom(db, roomId)!;
     expect(room.status).toBe("closed");
     expect(room.closed_at).toBeTruthy();
-    expect(room.close_reason).toBe("closed");
+    expect(room.close_reason).toBe("user_ended");
   });
 });

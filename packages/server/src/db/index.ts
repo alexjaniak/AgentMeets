@@ -2,8 +2,24 @@ import { Database } from "bun:sqlite";
 import { customAlphabet } from "nanoid";
 import { initializeSchema } from "./schema.js";
 
-export { createRoom, getRoom, joinRoom, closeRoom, expireRoom, getRoomByToken } from "./rooms.js";
+export {
+  createRoom,
+  getRoom,
+  joinRoom,
+  activateRoom,
+  closeRoom,
+  expireRoom,
+  getRoomByToken,
+  touchRoomActivity,
+} from "./rooms.js";
 export { saveMessage, getMessages, getPendingMessages } from "./messages.js";
+export {
+  createInvite,
+  issueInvite,
+  getInviteManifest,
+  claimInvite,
+  InviteError,
+} from "./invites.js";
 
 const DEFAULT_DB_PATH = "./agentmeets.db";
 

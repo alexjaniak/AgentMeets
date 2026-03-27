@@ -4,6 +4,12 @@
   "workspaces": [
     "packages/*"
   ],
+  "scripts": {
+    "smoke:full": "bun run scripts/smoke/full-stack.ts",
+    "smoke:inspect-live": "bun run scripts/smoke/inspect-live.ts",
+    "smoke:live-doc": "printf 'Open docs/local-smoke.md\\n'",
+    "smoke:packages": "bun run scripts/smoke/package-smoke.ts"
+  },
   "devDependencies": {
     "typescript": "^5.7.0"
   }

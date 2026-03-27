@@ -1,0 +1,38 @@
+.page {
+  min-height: 100svh;
+  background: #e3e9ee;
+}
+
+.shell {
+  min-height: 100svh;
+  padding: 28px;
+  background:
+    radial-gradient(circle at 50% 10%, rgba(255, 255, 255, 0.74) 0%, rgba(255, 255, 255, 0.16) 34%, rgba(227, 233, 238, 0) 60%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.42) 0%, rgba(227, 233, 238, 0.12) 18%, rgba(194, 206, 215, 0.18) 100%),
+    repeating-linear-gradient(
+      90deg,
+      rgba(58, 87, 100, 0.045) 0,
+      rgba(58, 87, 100, 0.045) 1px,
+      transparent 1px,
+      transparent 22px
+    ),
+    repeating-linear-gradient(
+      180deg,
+      rgba(58, 87, 100, 0.045) 0,
+      rgba(58, 87, 100, 0.045) 1px,
+      transparent 1px,
+      transparent 22px
+    );
+}
+
+.console {
+  width: min(1080px, 100%);
+  min-height: calc(100svh - 56px);
+  margin: 0 auto;
+  padding: clamp(28px, 5vw, 48px);
+  border: 1px solid rgba(28, 62, 74, 0.16);
+  background: rgba(248, 251, 253, 0.58);
+  color: #16333e;
+  font-family: "SFMono-Regular", "JetBrains Mono", "IBM Plex Mono", "Menlo", "Monaco", ui-monospace, monospace;
+  backdrop-filter: blur(14px);
+}

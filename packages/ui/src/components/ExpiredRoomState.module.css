@@ -1,0 +1,41 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.kicker {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: rgba(22, 51, 62, 0.68);
+}
+
+.title {
+  margin: 0;
+  font-size: clamp(42px, 7vw, 74px);
+  line-height: 0.9;
+  letter-spacing: -0.08em;
+  text-transform: lowercase;
+}
+
+.copy {
+  margin: 0;
+  max-width: 36rem;
+  font-size: 14px;
+  line-height: 1.7;
+  color: rgba(22, 51, 62, 0.8);
+}
+
+.action {
+  width: fit-content;
+  padding: 14px 18px;
+  border: 1px solid rgba(11, 114, 133, 0.34);
+  background: #0b7285;
+  color: #f5fbfd;
+  text-decoration: none;
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}

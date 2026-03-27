@@ -10,9 +10,17 @@ import {
   getRoomByToken,
 } from "./rooms.js";
 import { saveMessage, getMessages, getPendingMessages } from "./messages.js";
+import { createInvite, claimInvite } from "./invites.js";
 import { createDatabase, generateRoomId, generateToken } from "./index.js";
 
 let db: Database;
+const createRoomWithOpeningMessage = createRoom as unknown as (
+  db: Database,
+  id: string,
+  hostToken: string,
+  openingMessage: string,
+  roomStem?: string,
+) => { id: string };
 
 beforeEach(() => {
   db = new Database(":memory:");
@@ -29,6 +37,7 @@ describe("schema", () => {
     const names = tables.map((t) => t.name);
     expect(names).toContain("rooms");
     expect(names).toContain("messages");
+    expect(names).toContain("invites");
   });
 
   test("creates index on messages.room_id", () => {
@@ -39,6 +48,31 @@ describe("schema", () => {
       .all() as { name: string }[];
     const names = indexes.map((i) => i.name);
     expect(names).toContain("idx_messages_room");
+  });
+
+  test("adds room opening message linkage and hashed invite storage", () => {
+    const roomColumns = db.prepare(`PRAGMA table_info(rooms)`).all() as Array<{ name: string }>;
+    expect(roomColumns.map((column) => column.name)).toContain("opening_message_id");
+
+    const inviteColumns = db.prepare(`PRAGMA table_info(invites)`).all() as Array<{ name: string }>;
+    const inviteColumnNames = inviteColumns.map((column) => column.name);
+
+    expect(inviteColumnNames).toContain("room_id");
+    expect(inviteColumnNames).toContain("token_hash");
+    expect(inviteColumnNames).toContain("expires_at");
+    expect(inviteColumnNames).toContain("claimed_at");
+    expect(inviteColumnNames).toContain("claim_idempotency_key");
+    expect(inviteColumnNames).not.toContain("token");
+  });
+
+  test("adds room stem, last activity, and invite participant role storage", () => {
+    const roomColumns = db.prepare(`PRAGMA table_info(rooms)`).all() as Array<{ name: string }>;
+    const inviteColumns = db.prepare(`PRAGMA table_info(invites)`).all() as Array<{ name: string }>;
+
+    expect(roomColumns.map((column) => column.name)).toContain("room_stem");
+    expect(roomColumns.map((column) => column.name)).toContain("last_activity_at");
+    expect(inviteColumns.map((column) => column.name)).toContain("participant_role");
+    expect(inviteColumns.map((column) => column.name)).toContain("claim_session_token");
   });
 });
 
@@ -52,6 +86,34 @@ describe("createDatabase", () => {
 });
 
 describe("rooms", () => {
+  test("createRoom persists a high-entropy room stem and opening message id", () => {
+    createRoomWithOpeningMessage(
+      db,
+      "ABC123",
+      "host-token-1",
+      "Start here",
+      "r_9wK3mQvH8",
+    );
+
+    const roomRow = db
+      .prepare(
+        `SELECT id, room_stem, opening_message_id, last_activity_at FROM rooms WHERE id = ?`,
+      )
+      .get("ABC123") as {
+      id: string;
+      room_stem: string;
+      opening_message_id: number | null;
+      last_activity_at: string | null;
+    };
+
+    expect(roomRow).toMatchObject({
+      id: "ABC123",
+      room_stem: "r_9wK3mQvH8",
+      opening_message_id: expect.any(Number),
+      last_activity_at: expect.any(String),
+    });
+  });
+
   test("createRoom inserts a room with status waiting", () => {
     const room = createRoom(db, "ABC123", "host-token-1");
     expect(room.id).toBe("ABC123");
@@ -62,6 +124,27 @@ describe("rooms", () => {
     expect(room.joined_at).toBeNull();
     expect(room.closed_at).toBeNull();
     expect(room.close_reason).toBeNull();
+  });
+
+  test("createRoom persists the opening message atomically and links it from the room", () => {
+    createRoomWithOpeningMessage(db, "ABC123", "host-token-1", "Opening hello");
+
+    const roomRow = db
+      .prepare(`SELECT id, opening_message_id FROM rooms WHERE id = ?`)
+      .get("ABC123") as { id: string; opening_message_id: number | null };
+    expect(roomRow.id).toBe("ABC123");
+    expect(roomRow.opening_message_id).toEqual(expect.any(Number));
+
+    const messages = db
+      .prepare(`SELECT id, sender, content FROM messages WHERE room_id = ? ORDER BY id ASC`)
+      .all("ABC123") as Array<{ id: number; sender: string; content: string }>;
+    expect(messages).toEqual([
+      {
+        id: roomRow.opening_message_id!,
+        sender: "host",
+        content: "Opening hello",
+      },
+    ]);
   });
 
   test("getRoom returns room by id", () => {
@@ -153,6 +236,65 @@ describe("rooms", () => {
   test("getRoomByToken returns null for unknown token", () => {
     const result = getRoomByToken(db, "unknown-token");
     expect(result).toBeNull();
+  });
+});
+
+describe("participant invites", () => {
+  test("createInvite stores one host invite and one guest invite for the same room", () => {
+    createRoom(db, "ABC123", "host-token-1");
+
+    createInvite(db, "ABC123", "r_9wK3mQvH8.1");
+    createInvite(db, "ABC123", "r_9wK3mQvH8.2");
+
+    const rows = db
+      .prepare(
+        `SELECT participant_role, expires_at
+         FROM invites
+         WHERE room_id = ?
+         ORDER BY participant_role ASC`,
+      )
+      .all("ABC123") as Array<{
+      participant_role: string;
+      expires_at: string;
+    }>;
+
+    expect(rows).toEqual([
+      {
+        participant_role: "guest",
+        expires_at: expect.any(String),
+      },
+      {
+        participant_role: "host",
+        expires_at: expect.any(String),
+      },
+    ]);
+  });
+
+  test("claimInvite assigns the correct session token field by role", () => {
+    createRoom(db, "ABC123", "host-token-1");
+    createInvite(db, "ABC123", "r_9wK3mQvH8.1");
+    createInvite(db, "ABC123", "r_9wK3mQvH8.2");
+
+    const hostClaim = claimInvite(db, "r_9wK3mQvH8.1", "host-claim");
+    const guestClaim = claimInvite(db, "r_9wK3mQvH8.2", "guest-claim");
+
+    expect(hostClaim).toMatchObject({
+      roomId: "ABC123",
+      role: "host",
+      sessionToken: expect.any(String),
+      status: "activating",
+    });
+    expect(guestClaim).toMatchObject({
+      roomId: "ABC123",
+      role: "guest",
+      sessionToken: expect.any(String),
+      status: "activating",
+    });
+
+    expect(getRoom(db, "ABC123")).toMatchObject({
+      host_token: hostClaim.sessionToken,
+      guest_token: guestClaim.sessionToken,
+    });
   });
 });
 

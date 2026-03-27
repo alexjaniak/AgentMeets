@@ -1,5 +1,5 @@
 import type { ServerWebSocket } from "bun";
-import type { ClientMessage } from "@agentmeets/shared";
+import type { ClientMessage, ErrorCode, MessagePayload } from "@agentmeets/shared";
 import type { RoomManager, WsData } from "./room-manager.js";
 
 export function createWebSocketHandlers(roomManager: RoomManager) {
@@ -17,23 +17,29 @@ export function createWebSocketHandlers(roomManager: RoomManager) {
       try {
         msg = JSON.parse(text);
       } catch {
-        ws.close(1008, "Invalid JSON");
+        sendProtocolError(ws, "invalid_json", "Invalid JSON");
         return;
       }
 
       if (msg.type === "message") {
-        if (typeof msg.content !== "string") {
-          ws.close(1008, "Invalid message: content must be a string");
+        const validationError = validateMessagePayload(msg);
+        if (validationError) {
+          sendProtocolError(ws, "invalid_message", validationError);
           return;
         }
-        const ok = roomManager.handleMessage(roomId, role, msg.content);
+
+        const ok = roomManager.handleMessage(roomId, role, {
+          clientMessageId: msg.clientMessageId,
+          replyToMessageId: msg.replyToMessageId ?? null,
+          content: msg.content,
+        });
         if (!ok) {
           ws.close(1009, "Message too large");
         }
       } else if (msg.type === "end") {
         roomManager.handleEnd(roomId, role);
       } else {
-        ws.close(1008, "Unknown message type");
+        sendProtocolError(ws, "unknown_message_type", "Unknown message type");
       }
     },
 
@@ -45,4 +51,34 @@ export function createWebSocketHandlers(roomManager: RoomManager) {
       }
     },
   };
+}
+
+function validateMessagePayload(msg: MessagePayload): string | null {
+  if (typeof msg.clientMessageId !== "string" || msg.clientMessageId.length === 0) {
+    return "Invalid message: clientMessageId must be a non-empty string";
+  }
+
+  if (!Object.hasOwn(msg, "replyToMessageId")) {
+    return "Invalid message: replyToMessageId must be present and be an integer or null";
+  }
+
+  if (msg.replyToMessageId !== null) {
+    if (typeof msg.replyToMessageId !== "number" || !Number.isInteger(msg.replyToMessageId)) {
+      return "Invalid message: replyToMessageId must be present and be an integer or null";
+    }
+  }
+
+  if (typeof msg.content !== "string") {
+    return "Invalid message: content must be a string";
+  }
+
+  return null;
+}
+
+function sendProtocolError(
+  ws: ServerWebSocket<WsData>,
+  code: ErrorCode,
+  message: string,
+): void {
+  ws.send(JSON.stringify({ type: "error", code, message }));
 }

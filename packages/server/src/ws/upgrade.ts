@@ -29,15 +29,24 @@ export function handleUpgrade(
     return new Response("Token does not match room", { status: 401 });
   }
 
-  if (result.room.status === "closed" || result.room.status === "expired") {
+  roomManager.expireIdleRoomIfNeeded(roomId);
+  const refreshedResult = getRoomByToken(db, token);
+  if (!refreshedResult) {
+    return new Response("Invalid token or room not found", { status: 401 });
+  }
+
+  if (
+    refreshedResult.room.status === "closed"
+    || refreshedResult.room.status === "expired"
+  ) {
     return new Response("Room is no longer available", { status: 410 });
   }
 
-  if (roomManager.getConnection(result.room.id, result.role)) {
+  if (roomManager.getConnection(refreshedResult.room.id, refreshedResult.role)) {
     return new Response("Role already connected", { status: 409 });
   }
 
-  const wsData: WsData = { roomId, role: result.role };
+  const wsData: WsData = { roomId, role: refreshedResult.role };
 
   const upgraded = server.upgrade(req, { data: wsData });
   if (!upgraded) {

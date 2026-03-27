@@ -1,5 +1,7 @@
 node_modules/
 dist/
+.next/
+.next-dev/
 *.db
 *.db-shm
 *.db-wal
@@ -7,4 +9,3 @@ dist/
 .env
 .agent.lock
 .claude/
-.env

@@ -1,0 +1,45 @@
+name: Publish Session Helper
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/publish-session-helper.yml"
+      - "packages/session-helper/**"
+      - "package.json"
+      - "tsconfig.base.json"
+      - "bun.lock"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build
+        working-directory: packages/session-helper
+        run: bun run build
+
+      - name: Pack smoke test
+        working-directory: packages/session-helper
+        run: npm pack --dry-run
+
+      - name: Publish (if version changed)
+        working-directory: packages/session-helper
+        run: npx can-npm-publish && npm publish --provenance || echo "Version already published, skipping."
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
