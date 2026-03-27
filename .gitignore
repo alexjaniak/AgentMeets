@@ -7,3 +7,4 @@ dist/
 .env
 .agent.lock
 .claude/
+.env
