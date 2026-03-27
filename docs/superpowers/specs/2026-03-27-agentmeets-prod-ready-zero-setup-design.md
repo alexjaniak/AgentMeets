@@ -127,6 +127,12 @@ Canonical copy format:
 - host: `Tell your agent to join this chat: <hostLink>`
 - guest: `Tell the other agent to join this chat: <guestLink>`
 
+Minimum supported pasted forms:
+- the exact host instruction above
+- the exact guest instruction above
+- the raw `hostLink` URL by itself
+- the raw `guestLink` URL by itself
+
 Normal happy-path behavior must not require the human to run a helper command manually.
 
 Manual helper commands may still exist for diagnostics, smoke testing, or recovery, but they are not the documented product flow.
@@ -163,6 +169,13 @@ Browser/API status mapping:
 - active room broken intentionally or by disconnect -> `ended`
 - room never fully activated before deadline -> `expired`
 
+Pre-activation claim/connect rules:
+- each role link remains valid until the room becomes `active` or `expired`
+- pre-activation reconnect is allowed for either role within the same 10 minute window
+- browser status reflects currently connected roles, not merely a prior claim attempt
+- if one side connects and then drops before activation, status falls back to the currently connected-role view
+- once the room becomes `active`, reconnect/resume is unsupported; a later disconnect ends the room
+
 The 10-minute rule is absolute from room creation to full activation.
 
 ## Same-Session Bootstrap
@@ -175,6 +188,8 @@ Expected behavior:
 - the same session bootstraps the AgentMeets helper/runtime locally
 - that same session joins the room as host or guest depending on the link
 - the runtime attaches to the same session and surfaces remote messages locally
+- after successful join, the current session shows a deterministic local confirmation containing the AgentMeets role and connected room identity
+- on bootstrap failure, the current session shows a deterministic local error; the happy path must not depend on the model inventing extra recovery steps
 
 Requirements:
 - no new independent chat process may take over the conversation
@@ -182,6 +197,7 @@ Requirements:
 - no manual helper invocation is required in the happy path
 - no manual MCP tool invocation is required in the happy path
 - the user must not need to type `host_meet`, `guest_meet`, `send_and_wait`, or any equivalent manual room command
+- the implementation must not rely on the model inferring hidden extra instructions beyond the pasted invite text itself
 
 ## Conversation Runtime
 
@@ -192,6 +208,11 @@ Rules:
 - the active session drafts a reply in the same conversation
 - later inbound messages are queued while a reply is unresolved
 - the runtime does not send a second outbound message before the first is acknowledged
+- queued inbound messages are FIFO
+- queued inbound messages are not surfaced during the current message's 5 second hold or manual draft mode
+- after `/send`, queued inbound messages are released only after the outbound message is acknowledged
+- after `/end`, queued inbound messages are discarded because the room is over
+- new inbound traffic does not pause or cancel the current hold timer because it is queued rather than surfaced
 
 The browser has no role in the actual chat once the room is created.
 
@@ -269,6 +290,12 @@ Browser UI must not render:
 - helper commands as the happy-path copy
 - browser-side send controls
 - browser transcript panes
+- any legacy room-code or manual-command entry point in the standard launcher/status view
+
+Expiry handling:
+- the browser status view should refresh automatically while the room is unresolved
+- the view should show that the room is still waiting and that expiry is time-bounded
+- once the room becomes `expired`, copy actions are disabled and replaced with a create-new-room recovery action
 
 ## Server/API Direction
 
@@ -291,15 +318,19 @@ This work is done when all of the following are true:
 - Browser UI requires an opening message and shows the two copy-ready instructions plus status only.
 - Browser UI exposes `waiting_for_both`, `waiting_for_host`, `waiting_for_guest`, `active`, `ended`, and `expired` consistently with the server lifecycle.
 - Pasting either invite instruction into an already-running Claude Code or Codex session is sufficient to join from that same session.
+- Pasting the exact canonical host/guest instructions and the raw role links by themselves are all supported join triggers.
+- After successful join, the session displays a deterministic local connected confirmation instead of relying on implicit model behavior.
 - The happy path does not require the user to type `host_meet`, `guest_meet`, `send_and_wait`, or any equivalent manual helper command.
 - The guest sees the persisted opening message immediately on join.
 - The host also sees the persisted opening message in room history when the host session attaches.
 - Replies auto-send after 5 seconds unless interrupted with `e`.
 - Draft mode supports `/send`, `/regenerate`, `/revert`, `/end`, and free-form draft feedback.
+- Queued inbound messages are FIFO, remain hidden while the current message is unresolved, and release after outbound ack.
 - Rooms expire if both sides have not connected within 10 minutes of creation.
 - Conversation remains in CLI only for the happy path.
 - All four client pairings are verified from already-running sessions, not just fresh-session harnesses.
-- Browser UI does not render helper commands, browser join buttons, send controls, or transcript panes.
+- Browser UI does not render helper commands, browser join buttons, room-code entry points, send controls, or transcript panes.
+- Browser status auto-refreshes while unresolved and disables copy actions once the room expires.
 
 ## Recommended Implementation Slices
 
