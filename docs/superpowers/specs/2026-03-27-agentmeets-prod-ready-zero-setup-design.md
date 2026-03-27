@@ -26,6 +26,10 @@ It should feel like:
 - the agents begin talking in CLI
 - replies auto-send after a short hold unless a human interrupts to edit
 
+Standard user-facing identity primitive:
+- the normal product flow uses the role-scoped invite links and their copy-ready instructions as the room identity surface
+- internal raw room codes are not part of the standard user-facing launcher, confirmation, or error UX
+
 ## Goals
 
 - Support room creation from both CLI and browser UI.
@@ -138,6 +142,12 @@ Normal happy-path behavior must not require the human to run a helper command ma
 
 Manual helper commands may still exist for diagnostics, smoke testing, or recovery, but they are not the documented product flow.
 
+Recovery-command scope:
+- manual helper commands may appear in developer docs, smoke-test docs, and explicit diagnostics tooling only
+- they must not appear in standard browser UI
+- they must not appear in normal CLI create output
+- they must not appear in standard user-facing join success or failure UX
+
 ## Room Lifecycle
 
 ### Server Lifecycle
@@ -176,6 +186,9 @@ Pre-activation claim/connect rules:
 - browser status reflects currently connected roles, not merely a prior claim attempt
 - if one side connects and then drops before activation, status falls back to the currently connected-role view
 - once the room becomes `active`, reconnect/resume is unsupported; a later disconnect ends the room
+- only one live attached session per role is allowed at a time
+- if the same host or guest link is used by a second session while that role is already attached, the second attach fails deterministically as duplicate-role attach
+- if the currently attached pre-activation session disconnects, that role link may be reused by a replacement session until activation or expiry
 
 The 10-minute rule is absolute from room creation to full activation.
 
@@ -195,6 +208,8 @@ Expected behavior:
 Minimum confirmation/error content:
 - success confirmation includes role and room identity
 - failure includes a deterministic class such as invalid invite, expired invite, or local bootstrap/runtime failure
+- pre-activation confirmation includes waiting state when the opposite role is not yet attached
+- if a draft is staged before activation, local UX indicates that the reply is staged and will not deliver until the room becomes active
 
 Requirements:
 - no new independent chat process may take over the conversation
@@ -307,6 +322,11 @@ Browser UI must not render:
 - browser transcript panes
 - any legacy room-code or manual-command entry point in the standard launcher/status view
 
+Invite-link browser landing behavior:
+- opening a host or guest invite link in a browser must not create a browser chat experience
+- the browser may show a thin informational/status view only
+- that view may show the invite instruction and status, but must not show join, send, or transcript affordances
+
 Expiry handling:
 - the browser status view should refresh automatically while the room is unresolved
 - the view should show that the room is still waiting and that expiry is time-bounded
@@ -335,12 +355,15 @@ This work is done when all of the following are true:
 - Pasting either invite instruction into an already-running Claude Code or Codex session is sufficient to join from that same session.
 - Pasting the exact canonical host/guest instructions and the raw role links by themselves are all supported join triggers.
 - After successful join, the session displays a deterministic local connected confirmation instead of relying on implicit model behavior.
-- Success confirmation shows role and room identity.
+- Success confirmation shows role and the user-facing invite-based room identity, not a raw room code.
 - Failure handling is deterministic for invalid invite, expired invite, and local bootstrap/runtime failure.
+- Duplicate-role attach fails deterministically and does not replace the already attached live session.
+- If only one role is attached, the local UX shows waiting state for the missing role.
 - The happy path does not require the user to type `host_meet`, `guest_meet`, `send_and_wait`, or any equivalent manual helper command.
 - The guest sees the persisted opening message immediately on join.
 - The host also sees the persisted opening message in room history when the host session attaches.
 - If the guest joins before the host, the guest may draft immediately and outbound delivery waits until activation.
+- If the guest stages a reply before activation, local UX makes it clear that delivery is waiting on activation.
 - Replies auto-send after 5 seconds unless interrupted with `e`.
 - Draft mode supports `/send`, `/regenerate`, `/revert`, `/end`, and free-form draft feedback.
 - `/send` is immediate and ack-gated; `/regenerate` preserves `originalDraft` and stays in manual mode.
@@ -348,9 +371,12 @@ This work is done when all of the following are true:
 - Rooms expire if both sides have not connected within 10 minutes of creation.
 - Conversation remains in CLI only for the happy path.
 - All four client pairings are verified from already-running sessions, not just fresh-session harnesses.
+- Claude Code and Codex support the same pasted invite forms and equivalent success/error UX classes.
 - Standard CLI/browser launcher outputs expose only the two invite instructions plus room identity/status in the normal flow.
 - Browser UI does not render helper commands, browser join buttons, room-code entry points, send controls, or transcript panes.
+- Opening an invite link in a browser shows only a thin informational/status view, never browser join/send/transcript controls.
 - Browser status auto-refreshes while unresolved and disables copy actions once the room expires.
+- Standard user-facing success and failure UX does not advertise manual helper commands.
 
 ## Recommended Implementation Slices
 
