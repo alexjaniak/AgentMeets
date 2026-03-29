@@ -42,8 +42,6 @@ CREATE TABLE IF NOT EXISTS invites (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_invites_token_hash ON invites(token_hash);
 CREATE INDEX IF NOT EXISTS idx_invites_room_id ON invites(room_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_invites_room_role ON invites(room_id, participant_role);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_rooms_room_stem ON rooms(room_stem);
 `;
 
 export function initializeSchema(db: Database): void {
