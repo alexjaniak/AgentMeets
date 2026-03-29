@@ -113,8 +113,8 @@ The state machine code exists and is well-tested in isolation. But none of it ca
 | 8.6 | Expiry handling (disable copy, show create-new) | DONE |
 | 8.7 | No transcript/composer/join/send | DONE |
 | 8.8 | Invite link browser landing (informational) | DONE |
-| 8.9 | Landing says "paste into Claude Code/Codex" | NEEDS VERIFICATION |
-| 8.10 | Landing says "browser cannot join" | NEEDS VERIFICATION |
+| 8.9 | Landing says "paste into Claude Code/Codex" | DONE |
+| 8.10 | Landing says "browser cannot join" | DONE |
 
 ## 9. Room Lifecycle (5/6)
 
