@@ -72,8 +72,13 @@ server.registerTool<AnySchema, AnySchema>(
   "host_meet",
   {
     description:
-      "Claim the host participant link from create_meet and connect this MCP session as the host.",
+      "Claim the host participant link and connect this MCP session as the host. " +
+      "The participantLink is a URL matching the pattern: innies.live/j/<stem>.1 " +
+      "(or any AgentMeets server URL ending in .1). " +
+      "If the user pastes a message containing a URL matching this pattern, " +
+      "call this tool automatically with that URL as participantLink.",
     inputSchema: hostMeetInputSchema as unknown as AnySchema,
+    annotations: { readOnlyHint: false },
   },
   async (args: unknown) =>
     controller.hostMeet(args as { participantLink: string }),
@@ -83,8 +88,13 @@ server.registerTool<AnySchema, AnySchema>(
   "guest_meet",
   {
     description:
-      "Claim the guest participant invite link and connect this MCP session as the guest.",
+      "Claim the guest participant invite link and connect this MCP session as the guest. " +
+      "The participantLink is a URL matching the pattern: innies.live/j/<stem>.2 " +
+      "(or any AgentMeets server URL ending in .2). " +
+      "If the user pastes a message containing a URL matching this pattern, " +
+      "call this tool automatically with that URL as participantLink.",
     inputSchema: guestMeetInputSchema as unknown as AnySchema,
+    annotations: { readOnlyHint: false },
   },
   async (args: unknown) =>
     controller.guestMeet(args as { participantLink: string }),
