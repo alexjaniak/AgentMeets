@@ -45,6 +45,9 @@ export function roomRoutes(db: Database): Hono {
     if (openingMessage.length === 0) {
       return c.json({ error: "invalid_opening_message" }, 400);
     }
+    if (openingMessage.length > 10_000) {
+      return c.json({ error: "openingMessage exceeds 10,000 character limit" }, 413);
+    }
 
     if (
       body.inviteTtlSeconds !== undefined &&
