@@ -49,42 +49,28 @@ claude mcp add agentmeets-local -e AGENTMEETS_URL=http://127.0.0.1:3100 -- bun r
 ## Live Pass
 
 1. In the host agent session, create a meet with opening message `Smoke test: reply exactly with "guest ready".`
-2. Save the returned invite links in the host shell:
+2. The tool returns a `roomLabel`, paired invite instructions, and `status: "waiting_for_both"`. Copy the instruction lines for the next steps.
+3. **Host bootstrap (paste-invite flow):** Paste the `yourAgentInstruction` text (which contains the host invite URL) directly into the same Claude Code or Codex session. The session-helper bootstrap detects the URL, claims it, and attaches the runtime — no separate helper command needed.
 
-```bash
-export HOST_LINK='<PASTE_HOST_AGENT_LINK>'
-export GUEST_LINK='<PASTE_GUEST_AGENT_LINK>'
-```
+   Alternatively, use the explicit helper for local-branch testing:
 
-3. In the same host terminal session, run the branch-local host helper instead of the returned `hostHelperCommand`. This exercises the code in your checkout:
+   ```bash
+   export HOST_LINK='<PASTE_HOST_AGENT_LINK>'
+   bun "$REPO_ROOT/packages/session-helper/src/cli.ts" host --participant-link "$HOST_LINK"
+   ```
 
-- Claude Code:
+4. **Guest bootstrap (paste-invite flow):** Share the `otherAgentInstruction` text with the guest. The guest pastes it into their Claude Code or Codex session. The bootstrap claims the guest link, replays the opening message, and connects.
 
-```bash
-bun "$REPO_ROOT/packages/session-helper/src/cli.ts" host --participant-link "$HOST_LINK" --adapter claude-code
-```
+   Alternatively, use the explicit helper:
 
-- Codex:
+   ```bash
+   export GUEST_LINK='<PASTE_GUEST_AGENT_LINK>'
+   bun "$REPO_ROOT/packages/session-helper/src/cli.ts" guest --participant-link "$GUEST_LINK"
+   ```
 
-```bash
-bun "$REPO_ROOT/packages/session-helper/src/cli.ts" host --participant-link "$HOST_LINK" --adapter codex
-```
+   The helper auto-detects Claude Code vs Codex from environment markers. Pass `--adapter claude-code` or `--adapter codex` to force.
 
-4. In the guest agent session, run the matching deterministic guest helper in that same terminal session:
-
-- Claude Code:
-
-```bash
-bun "$REPO_ROOT/packages/session-helper/src/cli.ts" guest --participant-link "$GUEST_LINK" --adapter claude-code
-```
-
-- Codex:
-
-```bash
-bun "$REPO_ROOT/packages/session-helper/src/cli.ts" guest --participant-link "$GUEST_LINK" --adapter codex
-```
-
-5. Both helpers should inject native control prompts that call `host_meet` and `guest_meet` with the role-scoped invite links. No browser redirect or copied invite prose should be required.
+5. Both sides should connect without browser redirect. The host session sees `Room <stem>` connected status, the guest sees the replayed opening message.
 6. If you want the browser share page, derive the room page from the invite token stem:
 
 ```bash
