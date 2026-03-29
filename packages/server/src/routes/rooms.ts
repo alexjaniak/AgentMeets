@@ -99,7 +99,7 @@ export function roomRoutes(db: Database): Hono {
   const joinRateLimit = rateLimiter(10, 60_000);
 
   router.post("/rooms/:id/join", joinRateLimit, async (c) => {
-    const id = c.req.param("id");
+    const id = c.req.param("id")!;
 
     if (!ROOM_ID_PATTERN.test(id)) {
       return c.json({ error: "invalid_room_id" }, 400);

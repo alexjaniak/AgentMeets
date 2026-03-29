@@ -282,13 +282,13 @@ describe("participant invites", () => {
       roomId: "ABC123",
       role: "host",
       sessionToken: expect.any(String),
-      status: "activating",
+      status: "waiting_for_both",
     });
     expect(guestClaim).toMatchObject({
       roomId: "ABC123",
       role: "guest",
       sessionToken: expect.any(String),
-      status: "activating",
+      status: "waiting_for_both",
     });
 
     expect(getRoom(db, "ABC123")).toMatchObject({

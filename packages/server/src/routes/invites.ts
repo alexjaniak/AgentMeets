@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { Database } from "bun:sqlite";
 import { claimInvite, getInviteManifest, InviteError } from "../db/index.js";
 
@@ -44,11 +45,11 @@ export function inviteRoutes(db: Database): Hono {
               roomLabel: `Room ${parsedToken.roomStem}`,
               errorCode: error.code,
             }),
-            error.status,
+            error.status as ContentfulStatusCode,
           );
         }
 
-        return c.json({ error: error.code }, error.status);
+        return c.json({ error: error.code }, error.status as ContentfulStatusCode);
       }
       throw error;
     }
@@ -73,7 +74,7 @@ export function inviteRoutes(db: Database): Hono {
       );
     } catch (error) {
       if (error instanceof InviteError) {
-        return c.json({ error: error.code }, error.status);
+        return c.json({ error: error.code }, error.status as ContentfulStatusCode);
       }
       throw error;
     }
