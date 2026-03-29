@@ -25,16 +25,26 @@ const guestMeetInputSchema = z.object({
 });
 
 const sendAndWaitInputSchema = z.object({
-  message: z.string().describe("Message to send"),
+  message: z.string().describe("The message to stage for review before sending"),
   timeout: z
     .number()
     .optional()
     .default(120)
-    .describe("Max seconds to wait for reply"),
+    .describe("Timeout in seconds for waiting after confirm_send (default: 120)"),
 });
 
-const joinMeetInputSchema = z.object({
-  roomId: z.string().describe("Room code to join"),
+const confirmSendInputSchema = z.object({
+  draftId: z.string().describe("The draftId from the send_and_wait staging result"),
+  timeout: z
+    .number()
+    .optional()
+    .default(120)
+    .describe("Timeout in seconds to wait for the other participant's reply (default: 120)"),
+});
+
+const reviseDraftInputSchema = z.object({
+  draftId: z.string().describe("The draftId from the send_and_wait staging result"),
+  revisedMessage: z.string().describe("The updated message content"),
 });
 
 const controller = createMeetController({
@@ -81,23 +91,47 @@ server.registerTool<AnySchema, AnySchema>(
 );
 
 server.registerTool<AnySchema, AnySchema>(
-  "join_meet",
+  "send_and_wait",
   {
-    description: "Join an existing room by room code",
-    inputSchema: joinMeetInputSchema as unknown as AnySchema,
+    description:
+      "Stage a draft message for review. Does NOT send immediately. " +
+      "The draft is shown to the human for approval. After staging, wait approximately 5 seconds " +
+      "(as indicated by holdSeconds in the response), then call confirm_send to deliver it. " +
+      "If the human says anything during the hold (edit request, feedback, 'change X'), " +
+      "use revise_draft instead of confirm_send. " +
+      "If the human says 'send it' or similar, call confirm_send immediately without waiting.",
+    inputSchema: sendAndWaitInputSchema as unknown as AnySchema,
+    annotations: { readOnlyHint: false },
   },
   async (args: unknown) =>
-    controller.joinMeet(args as { roomId: string }),
+    controller.sendAndWait(args as { message: string; timeout?: number }),
 );
 
 server.registerTool<AnySchema, AnySchema>(
-  "send_and_wait",
+  "confirm_send",
   {
-    description: "Send a message and wait for a reply from the other participant",
-    inputSchema: sendAndWaitInputSchema as unknown as AnySchema,
+    description:
+      "Send the staged draft and wait for the other participant's reply. " +
+      "Call this after the human approves the draft (or after the ~5-second hold with no intervention). " +
+      "Returns the other participant's reply message.",
+    inputSchema: confirmSendInputSchema as unknown as AnySchema,
+    annotations: { readOnlyHint: false },
   },
   async (args: unknown) =>
-    controller.sendAndWait(args as { message: string; timeout: number }),
+    controller.confirmSend(args as { draftId: string; timeout?: number }),
+);
+
+server.registerTool<AnySchema, AnySchema>(
+  "revise_draft",
+  {
+    description:
+      "Revise the staged draft content. Use this when the human wants changes before sending. " +
+      "After revising, show the updated draft to the human and wait for approval before calling confirm_send.",
+    inputSchema: reviseDraftInputSchema as unknown as AnySchema,
+    annotations: { readOnlyHint: false },
+  },
+  async (args: unknown) =>
+    controller.reviseDraft(args as { draftId: string; revisedMessage: string }),
 );
 
 server.tool(
