@@ -1,5 +1,5 @@
 import { createEndPayload, createMeetState, createMessagePayload, processServerMessage } from "./client.js";
-import type { PendingReplyResult, MeetState, StagedDraft } from "./client.js";
+import type { PendingReplyResult, MeetState } from "./client.js";
 import { createCreateMeetHandler } from "./tools/create-meet.js";
 
 type ToolResult = {
@@ -8,10 +8,6 @@ type ToolResult = {
 };
 
 type Sender = "host" | "guest";
-
-interface JoinMeetResponse {
-  guestToken: string;
-}
 
 interface ClaimInviteResponse {
   roomId: string;
@@ -75,15 +71,11 @@ export function createMeetController({
     createMeet,
     hostMeet,
     guestMeet,
-    joinMeet,
     sendAndWait,
-    stageReply,
-    sendStaged,
-    reviseStaged,
+    confirmSend,
+    reviseDraft,
     endMeet,
-    getMeetState() {
-      return meetState;
-    },
+    getMeetState: () => meetState,
   };
 
   async function hostMeet({
@@ -154,185 +146,115 @@ export function createMeetController({
     });
   }
 
-  async function joinMeet({
-    roomId,
-  }: {
-    roomId: string;
-  }): Promise<ToolResult> {
-    if (meetState) {
-      return errorResult("A meet is already active. Call end_meet first.");
+  async function sendAndWait(input: { message: string; timeout?: number }): Promise<ToolResult> {
+    const activeMeet = meetState;
+    if (!activeMeet) {
+      return errorResult("No active meet session");
     }
 
-    let res: Response;
-    try {
-      res = await fetchFn(`${serverUrl}/rooms/${roomId}/join`, {
-        method: "POST",
-      });
-    } catch (err) {
-      return errorResult(`Cannot reach server at ${serverUrl}: ${err}`);
-    }
+    const draftId = crypto.randomUUID();
+    activeMeet.stagedDraft = {
+      id: draftId,
+      message: input.message,
+      originalDraft: input.message,
+    };
 
-    if (!res.ok) {
-      const statusErrors: Record<number, string> = {
-        404: "Room not found",
-        409: "Room is full",
-        410: "Room has expired",
-      };
-      return errorResult(
-        statusErrors[res.status] ?? `Server error: ${res.status}`,
-      );
-    }
-
-    const { guestToken } = (await res.json()) as JoinMeetResponse;
-    return connectMeet({
-      activeServerUrl: serverUrl,
-      roomId,
-      token: guestToken,
-      role: "guest",
+    return textResult({
+      status: "staged",
+      draftId,
+      message: input.message,
+      originalDraft: input.message,
+      holdSeconds: 5,
+      instruction:
+        "Reply will auto-send in 5s. Tell your agent to edit it, or say 'send it' to send now.",
     });
   }
 
-  async function sendAndWait({
-    message,
-    timeout,
-  }: {
-    message: string;
-    timeout: number;
-  }): Promise<ToolResult> {
-    if (!meetState) {
-      return errorResult(
-        "No active meet. Call create_meet, host_meet, guest_meet, or join_meet first.",
-      );
-    }
-
-    if (!meetState.ws || meetState.ws.readyState !== WebSocket.OPEN) {
-      clearState();
-      return errorResult("Connection lost");
-    }
-
+  async function confirmSend(input: { draftId: string; timeout?: number }): Promise<ToolResult> {
     const activeMeet = meetState;
+    if (!activeMeet) {
+      return errorResult("No active meet session");
+    }
+
+    if (!activeMeet.stagedDraft) {
+      return errorResult("No staged draft to send");
+    }
+
+    if (activeMeet.stagedDraft.id !== input.draftId) {
+      return errorResult("Draft ID mismatch — the draft may have been replaced");
+    }
+
+    const message = activeMeet.stagedDraft.message;
+    activeMeet.stagedDraft = null;
+
+    const ws = activeMeet.ws;
+    if (!ws || ws.readyState !== 1) {
+      clearState();
+      return errorResult("WebSocket not connected");
+    }
+
+    const timeout = input.timeout ?? 120;
     const payload = createMessagePayload(activeMeet, message);
 
     const result = await new Promise<PendingReplyResult>((resolve) => {
-      const finish = (value: PendingReplyResult) => resolve(value);
+      const finish = (r: PendingReplyResult) => {
+        clearTimeout(timer);
+        activeMeet.pendingReply = null;
+        resolve(r);
+      };
+
       activeMeet.pendingReply = { resolve: finish };
 
-      const timer = setTimeout(() => {
-        if (activeMeet.pendingReply?.resolve === finish) {
-          activeMeet.pendingReply = null;
-          finish({ content: null, reason: "timeout" });
-        }
-      }, timeout * 1_000);
+      const timer = setTimeout(
+        () => finish({ content: null, reason: "timeout" }),
+        timeout * 1000,
+      );
 
       try {
-        activeMeet.ws!.send(JSON.stringify(payload));
+        ws.send(JSON.stringify(payload));
       } catch {
-        clearTimeout(timer);
-        if (activeMeet.pendingReply?.resolve === finish) {
-          activeMeet.pendingReply = null;
-        }
         finish({ content: null, reason: "disconnected" });
       }
     });
 
     if (result.error) {
       return errorResult(
-        `WebSocket protocol error (${result.error.code}): ${result.error.message}`,
+        `Protocol error (${result.error.code}): ${result.error.message}`,
       );
     }
 
     if (result.content !== null) {
-      return textResult({ reply: result.content, status: "ok" });
+      return textResult({ reply: result.content, status: "ok", queuedMessages: [] });
     }
 
-    const reason =
-      result.reason ?? (meetState === null ? "disconnected" : "timeout");
-    clearState();
+    const reason = result.reason ?? "unknown";
+    if (reason === "timeout" || reason === "disconnected") {
+      clearState();
+    }
     return textResult({ reply: null, status: "ended", reason });
   }
 
-  async function stageReply({
-    message,
-  }: {
-    message: string;
-  }): Promise<ToolResult> {
-    if (!meetState) {
-      return errorResult(
-        "No active meet. Call create_meet, host_meet, guest_meet, or join_meet first.",
-      );
+  async function reviseDraft(input: { draftId: string; revisedMessage: string }): Promise<ToolResult> {
+    const activeMeet = meetState;
+    if (!activeMeet) {
+      return errorResult("No active meet session");
     }
 
-    const draft: StagedDraft = {
-      id: crypto.randomUUID(),
-      message,
-    };
-    meetState.stagedDraft = draft;
+    if (!activeMeet.stagedDraft) {
+      return errorResult("No staged draft to revise");
+    }
+
+    if (activeMeet.stagedDraft.id !== input.draftId) {
+      return errorResult("Draft ID mismatch — the draft may have been replaced");
+    }
+
+    activeMeet.stagedDraft.message = input.revisedMessage;
 
     return textResult({
       status: "staged",
-      draftId: draft.id,
-      message: draft.message,
-    });
-  }
-
-  async function sendStaged({
-    draftId,
-    timeout,
-  }: {
-    draftId: string;
-    timeout: number;
-  }): Promise<ToolResult> {
-    if (!meetState) {
-      return errorResult(
-        "No active meet. Call create_meet, host_meet, guest_meet, or join_meet first.",
-      );
-    }
-
-    if (!meetState.stagedDraft) {
-      return errorResult("No staged draft. Call stage_reply first.");
-    }
-
-    if (meetState.stagedDraft.id !== draftId) {
-      return errorResult(
-        "Draft ID mismatch. The staged draft may have been replaced. Call stage_reply again.",
-      );
-    }
-
-    const message = meetState.stagedDraft.message;
-    meetState.stagedDraft = null;
-
-    return sendAndWait({ message, timeout });
-  }
-
-  async function reviseStaged({
-    draftId,
-    revisedMessage,
-  }: {
-    draftId: string;
-    revisedMessage: string;
-  }): Promise<ToolResult> {
-    if (!meetState) {
-      return errorResult(
-        "No active meet. Call create_meet, host_meet, guest_meet, or join_meet first.",
-      );
-    }
-
-    if (!meetState.stagedDraft) {
-      return errorResult("No staged draft. Call stage_reply first.");
-    }
-
-    if (meetState.stagedDraft.id !== draftId) {
-      return errorResult(
-        "Draft ID mismatch. The staged draft may have been replaced. Call stage_reply again.",
-      );
-    }
-
-    meetState.stagedDraft.message = revisedMessage;
-
-    return textResult({
-      status: "staged",
-      draftId: meetState.stagedDraft.id,
-      message: meetState.stagedDraft.message,
+      draftId: activeMeet.stagedDraft.id,
+      message: input.revisedMessage,
+      originalDraft: activeMeet.stagedDraft.originalDraft,
     });
   }
 
