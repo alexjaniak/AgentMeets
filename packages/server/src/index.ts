@@ -41,5 +41,15 @@ export function createServer(port = 3000) {
 }
 
 const port = Number(process.env.PORT) || 3000;
-const { server } = createServer(port);
+const { server, roomManager } = createServer(port);
 console.log(`AgentMeets server listening on port ${server.port}`);
+
+function shutdown() {
+  console.log("Shutting down...");
+  roomManager.shutdown();
+  server.stop();
+  process.exit(0);
+}
+
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
