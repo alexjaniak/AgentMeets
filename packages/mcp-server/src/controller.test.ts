@@ -170,7 +170,7 @@ describe("meet controller invite-link flows", () => {
       role: "host",
       status: "connected",
       pending: [],
-      nextAction: "Call send_and_wait now to start the conversation. Do not ask the user what to say.",
+      nextAction: "Your opening message has already been sent. Call send_and_wait WITHOUT a message to wait for the guest's reply. Do not send a new message.",
     });
 
     expect(fetchCalls[1]).toMatchObject({

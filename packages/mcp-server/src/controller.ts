@@ -39,7 +39,7 @@ export interface MeetController {
   createMeet: ReturnType<typeof createCreateMeetHandler>;
   hostMeet(input: { participantLink: string }): Promise<ToolResult>;
   guestMeet(input: { participantLink: string }): Promise<ToolResult>;
-  sendAndWait(input: { message: string; timeout?: number }): Promise<ToolResult>;
+  sendAndWait(input: { message?: string; timeout?: number }): Promise<ToolResult>;
   confirmSend(input: { draftId?: string; timeout?: number }): Promise<ToolResult>;
   reviseDraft(input: { draftId: string; revisedMessage: string }): Promise<ToolResult>;
   endMeet(): Promise<ToolResult>;
@@ -146,7 +146,7 @@ export function createMeetController({
     });
   }
 
-  async function sendAndWait(input: { message: string; timeout?: number }): Promise<ToolResult> {
+  async function sendAndWait(input: { message?: string; timeout?: number }): Promise<ToolResult> {
     if (!meetState) {
       return errorResult(
         "No active meet. Call create_meet, host_meet, guest_meet, or join_meet first.",
@@ -160,7 +160,6 @@ export function createMeetController({
 
     const activeMeet = meetState;
     const timeout = input.timeout ?? 300;
-    const payload = createMessagePayload(activeMeet, input.message);
 
     const result = await new Promise<PendingReplyResult>((resolve) => {
       const finish = (value: PendingReplyResult) => resolve(value);
@@ -173,14 +172,17 @@ export function createMeetController({
         }
       }, timeout * 1_000);
 
-      try {
-        activeMeet.ws!.send(JSON.stringify(payload));
-      } catch {
-        clearTimeout(timer);
-        if (activeMeet.pendingReply?.resolve === finish) {
-          activeMeet.pendingReply = null;
+      if (input.message) {
+        const payload = createMessagePayload(activeMeet, input.message);
+        try {
+          activeMeet.ws!.send(JSON.stringify(payload));
+        } catch {
+          clearTimeout(timer);
+          if (activeMeet.pendingReply?.resolve === finish) {
+            activeMeet.pendingReply = null;
+          }
+          finish({ content: null, reason: "disconnected" });
         }
-        finish({ content: null, reason: "disconnected" });
       }
     });
 
@@ -373,6 +375,8 @@ export function createMeetController({
 
     if (pendingMessages.length > 0) {
       result.nextAction = "Call send_and_wait now with your response to the pending message(s). Do not ask the user what to say.";
+    } else if (role === "host") {
+      result.nextAction = "Your opening message has already been sent. Call send_and_wait WITHOUT a message to wait for the guest's reply. Do not send a new message.";
     } else {
       result.nextAction = "Call send_and_wait now to start the conversation. Do not ask the user what to say.";
     }

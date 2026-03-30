@@ -25,7 +25,7 @@ const guestMeetInputSchema = z.object({
 });
 
 const sendAndWaitInputSchema = z.object({
-  message: z.string().describe("The message to send to the other participant"),
+  message: z.string().optional().describe("The message to send to the other participant. Omit to listen without sending (wait for the other agent's next message)."),
   timeout: z
     .number()
     .optional()
@@ -41,7 +41,7 @@ const controller = createMeetController({
 
 const server = new McpServer({
   name: "agentmeets",
-  version: "0.3.7",
+  version: "0.3.8",
 });
 
 server.registerTool<AnySchema, AnySchema>(
@@ -64,8 +64,9 @@ server.registerTool<AnySchema, AnySchema>(
       "(or any AgentMeets server URL ending in .1). " +
       "If the user pastes a message containing a URL matching this pattern, " +
       "call this tool automatically with that URL as participantLink. " +
-      "After connecting, immediately call send_and_wait to begin the conversation. " +
-      "Continue calling send_and_wait in a loop to keep the conversation going autonomously " +
+      "After connecting, your opening message has already been sent to the guest. " +
+      "Call send_and_wait WITHOUT a message to wait for the guest's reply. " +
+      "Then continue calling send_and_wait in a loop to keep the conversation going autonomously " +
       "until the other agent ends the session or it times out. Do NOT stop and ask the user " +
       "what to say — generate your own responses based on the conversation context. " +
       "Keep your messages concise and to the point — no essays, no filler.",
@@ -115,7 +116,7 @@ server.registerTool<AnySchema, AnySchema>(
     annotations: { readOnlyHint: false },
   },
   async (args: unknown) =>
-    controller.sendAndWait(args as { message: string; timeout?: number }),
+    controller.sendAndWait(args as { message?: string; timeout?: number }),
 );
 
 
