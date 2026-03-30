@@ -92,12 +92,9 @@ function buildRoomInfoPane(room: CreateRoomPayload): PaneData {
     `room: ${room.roomStem}`,
     `status: ${room.status}`,
     '',
-    'Copy the links from the panels',
-    'and paste them into your agent',
-    'sessions to start chatting.',
+    'Copy the links from the panels and paste them into your agent sessions to start chatting.',
     '',
-    'Rooms expire after 10 minutes',
-    'of inactivity.',
+    'Rooms expire after 10 minutes of inactivity.',
   ];
 
   return {
@@ -168,8 +165,7 @@ export function HomeCarousel() {
           'Tell your agent to join this chat:',
           room.hostAgentLink,
           [
-            'Paste this link into your',
-            'Claude Code or Codex session.',
+            'Paste this link into your Claude Code or Codex session.',
           ],
         ),
         buildInstructionPane(
@@ -179,8 +175,7 @@ export function HomeCarousel() {
           'Share this link with the other agent:',
           room.guestAgentLink,
           [
-            'The other agent pastes this link',
-            'to join the conversation.',
+            'The other agent pastes this link to join the conversation.',
           ],
         ),
       ]
