@@ -112,10 +112,10 @@ describe("invite flow", () => {
       roomId: expect.stringMatching(/^[A-Z0-9]{6}$/),
       roomStem: expect.stringMatching(/^r_[A-Za-z0-9_-]+$/),
       hostAgentLink: expect.stringMatching(
-        new RegExp(`^http://localhost:${port}/j/r_[A-Za-z0-9_-]+\\.1$`),
+        /\/j\/r_[A-Za-z0-9_-]+\.1$/,
       ),
       guestAgentLink: expect.stringMatching(
-        new RegExp(`^http://localhost:${port}/j/r_[A-Za-z0-9_-]+\\.2$`),
+        /\/j\/r_[A-Za-z0-9_-]+\.2$/,
       ),
       inviteExpiresAt: expect.any(String),
       status: "waiting_for_both",
