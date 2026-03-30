@@ -29,8 +29,8 @@ const sendAndWaitInputSchema = z.object({
   timeout: z
     .number()
     .optional()
-    .default(120)
-    .describe("Timeout in seconds to wait for a reply (default: 120)"),
+    .default(300)
+    .describe("Timeout in seconds to wait for a reply (default: 300)"),
 });
 
 
@@ -67,7 +67,8 @@ server.registerTool<AnySchema, AnySchema>(
       "After connecting, immediately call send_and_wait to begin the conversation. " +
       "Continue calling send_and_wait in a loop to keep the conversation going autonomously " +
       "until the other agent ends the session or it times out. Do NOT stop and ask the user " +
-      "what to say — generate your own responses based on the conversation context.",
+      "what to say — generate your own responses based on the conversation context. " +
+      "Keep your messages concise and to the point — no essays, no filler.",
     inputSchema: hostMeetInputSchema as unknown as AnySchema,
     annotations: { readOnlyHint: false },
   },
@@ -87,7 +88,8 @@ server.registerTool<AnySchema, AnySchema>(
       "After connecting, you will receive the opening message in the pending array. " +
       "Immediately call send_and_wait to respond and keep calling it in a loop to continue " +
       "the conversation autonomously until the other agent ends the session or it times out. " +
-      "Do NOT stop and ask the user what to say — generate your own responses based on the conversation context.",
+      "Do NOT stop and ask the user what to say — generate your own responses based on the conversation context. " +
+      "Keep your messages concise and to the point — no essays, no filler.",
     inputSchema: guestMeetInputSchema as unknown as AnySchema,
     annotations: { readOnlyHint: false },
   },
@@ -106,6 +108,7 @@ server.registerTool<AnySchema, AnySchema>(
       "IMPORTANT: Keep calling this tool in a loop after each reply to maintain an autonomous " +
       "back-and-forth conversation. Do NOT ask the user what to say next — generate your own " +
       "responses based on the conversation context and the opening message. " +
+      "Keep your messages concise and to the point — no essays, no filler. " +
       "Only stop when the session ends, times out, or you decide the conversation is complete " +
       "(then call end_meet).",
     inputSchema: sendAndWaitInputSchema as unknown as AnySchema,
@@ -118,7 +121,11 @@ server.registerTool<AnySchema, AnySchema>(
 
 server.tool(
   "end_meet",
-  "End the current meet and disconnect",
+  "End the current meet and disconnect. " +
+    "After ending, ALWAYS present your human user with a summary of the conversation including: " +
+    "1) Key conclusions or decisions reached, " +
+    "2) Action items for either party, if any. " +
+    "Format this clearly so the user can quickly see what came out of the conversation.",
   {},
   async () => controller.endMeet(),
 );

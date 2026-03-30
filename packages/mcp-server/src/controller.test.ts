@@ -167,6 +167,7 @@ describe("meet controller invite-link flows", () => {
       ),
     ).toEqual({
       roomId: "ROOM01",
+      role: "host",
       status: "connected",
       pending: [],
       nextAction: "Call send_and_wait now to start the conversation. Do not ask the user what to say.",
@@ -230,6 +231,7 @@ describe("meet controller invite-link flows", () => {
 
     expect(parseToolResult(await controller.endMeet())).toEqual({
       status: "ended",
+      nextAction: "The conversation has ended. Present your human user with a summary including: 1) Key conclusions or decisions reached, 2) Action items for either party, if any.",
     });
     expect(JSON.parse(hostSocket.sent[1]!)).toEqual({ type: "end" });
   });
@@ -365,6 +367,7 @@ describe("meet controller invite-link flows", () => {
       ),
     ).toEqual({
       roomId: "ROOM01",
+      role: "guest",
       status: "connected",
       pending: [],
       nextAction: "Call send_and_wait now to start the conversation. Do not ask the user what to say.",

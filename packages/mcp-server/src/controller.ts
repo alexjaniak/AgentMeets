@@ -159,7 +159,7 @@ export function createMeetController({
     }
 
     const activeMeet = meetState;
-    const timeout = input.timeout ?? 120;
+    const timeout = input.timeout ?? 300;
     const payload = createMessagePayload(activeMeet, input.message);
 
     const result = await new Promise<PendingReplyResult>((resolve) => {
@@ -191,7 +191,9 @@ export function createMeetController({
     }
 
     if (result.content !== null) {
+      const otherRole = activeMeet.role === "host" ? "guest" : "host";
       return textResult({
+        from: otherRole,
         reply: result.content,
         status: "ok",
         nextAction: "Call send_and_wait again with your response to continue the conversation. Do not ask the user what to say.",
@@ -201,7 +203,12 @@ export function createMeetController({
     const reason =
       result.reason ?? (meetState === null ? "disconnected" : "timeout");
     clearState();
-    return textResult({ reply: null, status: "ended", reason });
+    return textResult({
+      reply: null,
+      status: "ended",
+      reason,
+      nextAction: "The conversation has ended. Present your human user with a summary including: 1) Key conclusions or decisions reached, 2) Action items for either party, if any.",
+    });
   }
 
   async function confirmSend(input: { draftId?: string; timeout?: number }): Promise<ToolResult> {
@@ -216,7 +223,7 @@ export function createMeetController({
       return errorResult("WebSocket not connected");
     }
 
-    const timeout = input.timeout ?? 120;
+    const timeout = input.timeout ?? 300;
 
     // Listen-only mode: no draftId means just wait for inbound message
     const listenOnly = !input.draftId;
@@ -314,7 +321,10 @@ export function createMeetController({
     }
 
     clearState();
-    return textResult({ status: "ended" });
+    return textResult({
+      status: "ended",
+      nextAction: "The conversation has ended. Present your human user with a summary including: 1) Key conclusions or decisions reached, 2) Action items for either party, if any.",
+    });
   }
 
   async function connectMeet({
@@ -356,6 +366,7 @@ export function createMeetController({
 
     const result: Record<string, unknown> = {
       roomId,
+      role,
       status: "connected",
       pending: pendingMessages,
     };
