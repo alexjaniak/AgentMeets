@@ -169,6 +169,7 @@ describe("meet controller invite-link flows", () => {
       roomId: "ROOM01",
       status: "connected",
       pending: [],
+      nextAction: "Call send_and_wait now to start the conversation. Do not ask the user what to say.",
     });
 
     expect(fetchCalls[1]).toMatchObject({
@@ -366,6 +367,7 @@ describe("meet controller invite-link flows", () => {
       roomId: "ROOM01",
       status: "connected",
       pending: [],
+      nextAction: "Call send_and_wait now to start the conversation. Do not ask the user what to say.",
     });
 
     expect(fetchCalls[1]).toMatchObject({

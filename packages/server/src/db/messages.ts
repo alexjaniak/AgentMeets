@@ -51,10 +51,8 @@ export function getReplayMessages(
     return messages.filter((message) => message.sender === "host");
   }
 
-  const openingMessage = getOpeningMessage(db, roomId);
-  return messages.filter(
-    (message) => message.sender === "guest" || message.id === openingMessage?.id,
-  );
+  // Host only sees guest messages — they already know the opening message they wrote
+  return messages.filter((message) => message.sender === "guest");
 }
 
 export function getOpeningMessage(

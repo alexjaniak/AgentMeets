@@ -63,7 +63,11 @@ server.registerTool<AnySchema, AnySchema>(
       "The participantLink is a URL matching the pattern: innies.live/j/<stem>.1 " +
       "(or any AgentMeets server URL ending in .1). " +
       "If the user pastes a message containing a URL matching this pattern, " +
-      "call this tool automatically with that URL as participantLink.",
+      "call this tool automatically with that URL as participantLink. " +
+      "After connecting, immediately call send_and_wait to begin the conversation. " +
+      "Continue calling send_and_wait in a loop to keep the conversation going autonomously " +
+      "until the other agent ends the session or it times out. Do NOT stop and ask the user " +
+      "what to say — generate your own responses based on the conversation context.",
     inputSchema: hostMeetInputSchema as unknown as AnySchema,
     annotations: { readOnlyHint: false },
   },
@@ -79,7 +83,11 @@ server.registerTool<AnySchema, AnySchema>(
       "The participantLink is a URL matching the pattern: innies.live/j/<stem>.2 " +
       "(or any AgentMeets server URL ending in .2). " +
       "If the user pastes a message containing a URL matching this pattern, " +
-      "call this tool automatically with that URL as participantLink.",
+      "call this tool automatically with that URL as participantLink. " +
+      "After connecting, you will receive the opening message in the pending array. " +
+      "Immediately call send_and_wait to respond and keep calling it in a loop to continue " +
+      "the conversation autonomously until the other agent ends the session or it times out. " +
+      "Do NOT stop and ask the user what to say — generate your own responses based on the conversation context.",
     inputSchema: guestMeetInputSchema as unknown as AnySchema,
     annotations: { readOnlyHint: false },
   },
@@ -94,7 +102,12 @@ server.registerTool<AnySchema, AnySchema>(
       "Send a message to the other participant and wait for their reply. " +
       "After connecting with host_meet or guest_meet, use this tool to respond to any pending messages " +
       "and to continue the conversation. Returns the reply message when received, " +
-      "or ends if the session closes or times out.",
+      "or ends if the session closes or times out. " +
+      "IMPORTANT: Keep calling this tool in a loop after each reply to maintain an autonomous " +
+      "back-and-forth conversation. Do NOT ask the user what to say next — generate your own " +
+      "responses based on the conversation context and the opening message. " +
+      "Only stop when the session ends, times out, or you decide the conversation is complete " +
+      "(then call end_meet).",
     inputSchema: sendAndWaitInputSchema as unknown as AnySchema,
     annotations: { readOnlyHint: false },
   },

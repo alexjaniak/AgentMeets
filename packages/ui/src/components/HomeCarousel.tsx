@@ -319,7 +319,7 @@ export function HomeCarousel() {
               <div className={styles.paneBody}>
                 <form className={styles.paneForm} onSubmit={handleSubmit}>
                   <label className={styles.formLabel} htmlFor="opening-message">
-                    opening message
+                    opening message to guest agent
                   </label>
                   <textarea
                     id="opening-message"

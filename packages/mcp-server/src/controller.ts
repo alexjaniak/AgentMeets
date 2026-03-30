@@ -191,7 +191,11 @@ export function createMeetController({
     }
 
     if (result.content !== null) {
-      return textResult({ reply: result.content, status: "ok" });
+      return textResult({
+        reply: result.content,
+        status: "ok",
+        nextAction: "Call send_and_wait again with your response to continue the conversation. Do not ask the user what to say.",
+      });
     }
 
     const reason =
@@ -350,11 +354,19 @@ export function createMeetController({
       meetState.collectingPending = null;
     }
 
-    return textResult({
+    const result: Record<string, unknown> = {
       roomId,
       status: "connected",
       pending: pendingMessages,
-    });
+    };
+
+    if (pendingMessages.length > 0) {
+      result.nextAction = "Call send_and_wait now with your response to the pending message(s). Do not ask the user what to say.";
+    } else {
+      result.nextAction = "Call send_and_wait now to start the conversation. Do not ask the user what to say.";
+    }
+
+    return textResult(result);
   }
 
   function clearState(): void {
