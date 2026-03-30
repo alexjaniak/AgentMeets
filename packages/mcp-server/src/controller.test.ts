@@ -184,20 +184,9 @@ describe("meet controller invite-link flows", () => {
     const hostSocket = sockets[0]!;
     hostSocket.emitMessage({ type: "room_active" });
 
-    // Stage a draft
-    const stageResult = parseToolResult(
-      await controller.sendAndWait({
-        message: "What changed?",
-        timeout: 1,
-      }),
-    );
-    expect(stageResult.status).toBe("staged");
-    expect(stageResult.holdSeconds).toBe(5);
-    const draftId = stageResult.draftId as string;
-
-    // Confirm send
-    const replyPromise = controller.confirmSend({
-      draftId,
+    // Send a message and wait for reply
+    const replyPromise = controller.sendAndWait({
+      message: "What changed?",
       timeout: 1,
     });
 

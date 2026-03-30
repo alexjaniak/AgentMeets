@@ -147,27 +147,57 @@ export function createMeetController({
   }
 
   async function sendAndWait(input: { message: string; timeout?: number }): Promise<ToolResult> {
-    const activeMeet = meetState;
-    if (!activeMeet) {
-      return errorResult("No active meet session");
+    if (!meetState) {
+      return errorResult(
+        "No active meet. Call create_meet, host_meet, guest_meet, or join_meet first.",
+      );
     }
 
-    const draftId = crypto.randomUUID();
-    activeMeet.stagedDraft = {
-      id: draftId,
-      message: input.message,
-      originalDraft: input.message,
-    };
+    if (!meetState.ws || meetState.ws.readyState !== 1) {
+      clearState();
+      return errorResult("Connection lost");
+    }
 
-    return textResult({
-      status: "staged",
-      draftId,
-      message: input.message,
-      originalDraft: input.message,
-      holdSeconds: 5,
-      instruction:
-        "Reply will auto-send in 5s. Tell your agent to edit it, or say 'send it' to send now.",
+    const activeMeet = meetState;
+    const timeout = input.timeout ?? 120;
+    const payload = createMessagePayload(activeMeet, input.message);
+
+    const result = await new Promise<PendingReplyResult>((resolve) => {
+      const finish = (value: PendingReplyResult) => resolve(value);
+      activeMeet.pendingReply = { resolve: finish };
+
+      const timer = setTimeout(() => {
+        if (activeMeet.pendingReply?.resolve === finish) {
+          activeMeet.pendingReply = null;
+          finish({ content: null, reason: "timeout" });
+        }
+      }, timeout * 1_000);
+
+      try {
+        activeMeet.ws!.send(JSON.stringify(payload));
+      } catch {
+        clearTimeout(timer);
+        if (activeMeet.pendingReply?.resolve === finish) {
+          activeMeet.pendingReply = null;
+        }
+        finish({ content: null, reason: "disconnected" });
+      }
     });
+
+    if (result.error) {
+      return errorResult(
+        `WebSocket protocol error (${result.error.code}): ${result.error.message}`,
+      );
+    }
+
+    if (result.content !== null) {
+      return textResult({ reply: result.content, status: "ok" });
+    }
+
+    const reason =
+      result.reason ?? (meetState === null ? "disconnected" : "timeout");
+    clearState();
+    return textResult({ reply: null, status: "ended", reason });
   }
 
   async function confirmSend(input: { draftId?: string; timeout?: number }): Promise<ToolResult> {

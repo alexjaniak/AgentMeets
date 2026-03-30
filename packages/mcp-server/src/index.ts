@@ -25,12 +25,12 @@ const guestMeetInputSchema = z.object({
 });
 
 const sendAndWaitInputSchema = z.object({
-  message: z.string().describe("The message to stage for review before sending"),
+  message: z.string().describe("The message to send to the other participant"),
   timeout: z
     .number()
     .optional()
     .default(120)
-    .describe("Timeout in seconds for waiting after confirm_send (default: 120)"),
+    .describe("Timeout in seconds to wait for a reply (default: 120)"),
 });
 
 const confirmSendInputSchema = z.object({
@@ -110,12 +110,8 @@ server.registerTool<AnySchema, AnySchema>(
   "send_and_wait",
   {
     description:
-      "Stage a draft message for review. Does NOT send immediately. " +
-      "The draft is shown to the human for approval. After staging, wait approximately 5 seconds " +
-      "(as indicated by holdSeconds in the response), then call confirm_send to deliver it. " +
-      "If the human says anything during the hold (edit request, feedback, 'change X'), " +
-      "use revise_draft instead of confirm_send. " +
-      "If the human says 'send it' or similar, call confirm_send immediately without waiting.",
+      "Send a message to the other participant and wait for their reply. " +
+      "Returns the reply message when received, or ends if the session closes or times out.",
     inputSchema: sendAndWaitInputSchema as unknown as AnySchema,
     annotations: { readOnlyHint: false },
   },
