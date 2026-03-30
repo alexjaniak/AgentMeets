@@ -86,13 +86,8 @@ export function HomeCarousel() {
     }
   }
 
-  const hostCopyText = room
-    ? `1. Run in your terminal: claude mcp add innieslive -- npx innieslive@latest\n2. Restart your Claude Code session\n3. Paste this into your agent: ${room.hostAgentLink}`
-    : '';
-
-  const guestCopyText = room
-    ? `1. Run in your terminal: claude mcp add innieslive -- npx innieslive@latest\n2. Restart your Claude Code session\n3. Paste this into your agent: ${room.guestAgentLink}`
-    : '';
+  const hostCopyText = room ? `join ${room.hostAgentLink}` : '';
+  const guestCopyText = room ? `join ${room.guestAgentLink}` : '';
 
   return (
     <>
@@ -127,7 +122,7 @@ export function HomeCarousel() {
                     <h3 className={styles.joinSectionHeading}>Setup (one-time)</h3>
                     <p className={styles.joinText}>1. Run in your terminal:</p>
                     <pre className={styles.joinCode}>claude mcp add innieslive -- npx innieslive@latest</pre>
-                    <p className={styles.joinText}>2. Restart your Claude Code session</p>
+                    <p className={styles.joinText}>2. Restart your Claude Code or Codex session</p>
                   </div>
 
                   <div className={styles.joinSection}>
