@@ -33,25 +33,6 @@ const sendAndWaitInputSchema = z.object({
     .describe("Timeout in seconds to wait for a reply (default: 120)"),
 });
 
-const confirmSendInputSchema = z.object({
-  draftId: z
-    .string()
-    .optional()
-    .describe(
-      "The draftId from the send_and_wait staging result. " +
-      "Omit to use listen-only mode (wait for inbound message without sending).",
-    ),
-  timeout: z
-    .number()
-    .optional()
-    .default(120)
-    .describe("Timeout in seconds to wait for the other participant's reply (default: 120)"),
-});
-
-const reviseDraftInputSchema = z.object({
-  draftId: z.string().describe("The draftId from the send_and_wait staging result"),
-  revisedMessage: z.string().describe("The updated message content"),
-});
 
 const controller = createMeetController({
   serverUrl: SERVER_URL,
@@ -60,7 +41,7 @@ const controller = createMeetController({
 
 const server = new McpServer({
   name: "agentmeets",
-  version: "0.3.0",
+  version: "0.3.4",
 });
 
 server.registerTool<AnySchema, AnySchema>(
@@ -111,7 +92,9 @@ server.registerTool<AnySchema, AnySchema>(
   {
     description:
       "Send a message to the other participant and wait for their reply. " +
-      "Returns the reply message when received, or ends if the session closes or times out.",
+      "After connecting with host_meet or guest_meet, use this tool to respond to any pending messages " +
+      "and to continue the conversation. Returns the reply message when received, " +
+      "or ends if the session closes or times out.",
     inputSchema: sendAndWaitInputSchema as unknown as AnySchema,
     annotations: { readOnlyHint: false },
   },
@@ -119,34 +102,6 @@ server.registerTool<AnySchema, AnySchema>(
     controller.sendAndWait(args as { message: string; timeout?: number }),
 );
 
-server.registerTool<AnySchema, AnySchema>(
-  "confirm_send",
-  {
-    description:
-      "Send the staged draft and wait for the other participant's reply. " +
-      "Call this after the human approves the draft (or after the ~5-second hold with no intervention). " +
-      "Returns the other participant's reply message. " +
-      "Listen-only mode: omit draftId to wait for an inbound message without sending anything. " +
-      "Use this after host_meet when waiting for the guest's first reply to the opening message.",
-    inputSchema: confirmSendInputSchema as unknown as AnySchema,
-    annotations: { readOnlyHint: false },
-  },
-  async (args: unknown) =>
-    controller.confirmSend(args as { draftId: string; timeout?: number }),
-);
-
-server.registerTool<AnySchema, AnySchema>(
-  "revise_draft",
-  {
-    description:
-      "Revise the staged draft content. Use this when the human wants changes before sending. " +
-      "After revising, show the updated draft to the human and wait for approval before calling confirm_send.",
-    inputSchema: reviseDraftInputSchema as unknown as AnySchema,
-    annotations: { readOnlyHint: false },
-  },
-  async (args: unknown) =>
-    controller.reviseDraft(args as { draftId: string; revisedMessage: string }),
-);
 
 server.tool(
   "end_meet",
