@@ -1,6 +1,6 @@
 'use client';
 
-import { startTransition, useEffect, useState, type CSSProperties } from 'react';
+import { startTransition, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { createRoom, type CreateRoomPayload } from '../lib/api';
 import { PaneCopyButton } from './PaneCopyButton';
 import styles from '../app/page.module.css';
@@ -85,28 +85,12 @@ function buildInstructionPane(
   };
 }
 
-function buildRoomInfoPane(room: CreateRoomPayload): PaneData {
-  const rawLines = [
-    '# Room Created',
-    '',
-    `room: ${room.roomStem}`,
-    `status: ${room.status}`,
-    '',
-    'Copy the links from the panels and paste them into your agent sessions to start chatting.',
-    '',
-    'Rooms expire after 10 minutes of inactivity.',
-  ];
-
-  return {
-    id: 'room-info',
-    fileName: 'room-info.md',
-    lines: rawLines.map((text, i) => ({
-      number: i + 1,
-      text,
-      kind: lineKind(text, false),
-    })),
-    copyText: `Room: ${room.roomStem}\nHost: ${room.hostAgentLink}\nGuest: ${room.guestAgentLink}`,
-  };
+function formatCountdown(expiresAt: string): string {
+  const diff = new Date(expiresAt).getTime() - Date.now();
+  if (diff <= 0) return '0:00';
+  const mins = Math.floor(diff / 60_000);
+  const secs = Math.floor((diff % 60_000) / 1000);
+  return `${mins}:${String(secs).padStart(2, '0')}`;
 }
 
 function InstructionPaneCard({ pane }: { pane: PaneData }) {
@@ -120,7 +104,7 @@ function InstructionPaneCard({ pane }: { pane: PaneData }) {
         </div>
         <div className={styles.paneTab}>{pane.fileName}</div>
         <div className={styles.paneChromeActions}>
-          <div className={styles.paneCount}>{pane.lines.length} lines</div>
+          <div className={styles.paneCount}>COPY AND SEND TO AGENT &rarr;</div>
           <PaneCopyButton fileName={pane.fileName} contents={pane.copyText} />
         </div>
       </div>
@@ -152,15 +136,16 @@ export function HomeCarousel() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pageSize, setPageSize] = useState(3);
   const [activePage, setActivePage] = useState(0);
+  const [countdown, setCountdown] = useState('');
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const trimmedMessage = openingMessage.trim();
 
   const panes: PaneData[] = room
     ? [
-        buildRoomInfoPane(room),
         buildInstructionPane(
           'host',
-          'host-agent.md',
+          'host-agent-join.md',
           'Host Agent',
           'Tell your agent to join this chat:',
           room.hostAgentLink,
@@ -170,7 +155,7 @@ export function HomeCarousel() {
         ),
         buildInstructionPane(
           'guest',
-          'guest-agent.md',
+          'guest-agent-join.md',
           'Guest Agent',
           'Share this link with the other agent:',
           room.guestAgentLink,
@@ -184,6 +169,16 @@ export function HomeCarousel() {
   const pages = room ? chunkIntoPages(panes, pageSize) : [];
   const buttonState = getPageButtonState(activePage, pages.length);
   const showCarouselControls = room && pages.length > 1;
+
+  useEffect(() => {
+    if (!room) return;
+    const tick = () => setCountdown(formatCountdown(room.inviteExpiresAt));
+    tick();
+    countdownRef.current = setInterval(tick, 1000);
+    return () => {
+      if (countdownRef.current) clearInterval(countdownRef.current);
+    };
+  }, [room]);
 
   useEffect(() => {
     const syncPageSize = () => {
@@ -234,7 +229,7 @@ export function HomeCarousel() {
               ROOM WORKSPACE
             </span>
             <span className={styles.workspaceHint}>
-              {`${panes.length} PANES LOADED \u00b7 COPY AND SEND TO AGENT`}
+              {`ROOM: ${room.roomStem} \u00b7 STATUS: ${room.status.replaceAll('_', ' ').toUpperCase()} \u00b7 EXPIRES: ${countdown}`}
             </span>
           </>
         ) : (
