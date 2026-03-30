@@ -222,11 +222,7 @@ describe("browser room presentation", () => {
       `ws://localhost:${port}/rooms/${created.roomId}/ws?token=${hostClaim.sessionToken}`,
     );
     await waitForOpen(hostWs);
-    expect(await waitForMessage(hostWs)).toMatchObject({
-      type: "message",
-      sender: "host",
-      content: "Track ended browser state.",
-    });
+    // Host no longer receives its own opening message on replay
 
     const hostActivationPromise = waitForMessage(hostWs);
     const guestWs = new WebSocket(
@@ -295,11 +291,7 @@ describe("browser room presentation", () => {
       `ws://localhost:${port}/rooms/${created.roomId}/ws?token=${hostClaim.sessionToken}`,
     );
     await waitForOpen(hostWs);
-    expect(await waitForMessage(hostWs)).toMatchObject({
-      type: "message",
-      sender: "host",
-      content: "Browser-safe room flow.",
-    });
+    // Host no longer receives its own opening message on replay
 
     const hostActivationPromise = waitForMessage(hostWs);
     const guestWs = new WebSocket(

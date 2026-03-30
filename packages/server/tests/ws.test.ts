@@ -256,11 +256,8 @@ describe("WebSocket relay — integration tests", () => {
     const hostWs = connectAs("host-token-790", roomId);
     await waitForOpen(hostWs);
 
-    expect(await waitForMessage(hostWs)).toMatchObject({
-      type: "message",
-      sender: "host",
-      content: "Opening context.",
-    });
+    // Host no longer receives its own opening message on replay
+    await expectNoMessage(hostWs);
 
     const hostAckPromise = waitForMessage(hostWs);
     hostWs.send(
@@ -338,23 +335,23 @@ describe("WebSocket relay — integration tests", () => {
 
     const guestActivationPromise = waitForMessage(guestWs);
     const hostWs = connectAs("host-token-791", roomId);
-    const hostMessagesPromise = waitForMessages(hostWs, 3);
+    // Host gets: guest reply replay + room_active (no own opening message replay)
+    const hostMessagesPromise = waitForMessages(hostWs, 2);
     await waitForOpen(hostWs);
 
     const [hostMessages, guestActivation] = await Promise.all([
       hostMessagesPromise,
       guestActivationPromise,
     ]);
-    expect(hostMessages[0]).toEqual(roomActive(roomId));
     expect(guestActivation).toEqual(roomActive(roomId));
 
     const replayedToHost = hostMessages
-      .slice(1)
+      .filter((message) => (message as Record<string, unknown>).type === "message")
       .map((message) => (message as Record<string, unknown>).content);
     expect(replayedToHost).toEqual([
-      "Opening message from the room creator.",
       "Guest reply drafted before host attach.",
     ]);
+    expect(hostMessages.find((m) => (m as Record<string, unknown>).type === "room_active")).toEqual(roomActive(roomId));
 
     roomManager.cleanupRoom(roomId);
     hostWs.close();
@@ -560,11 +557,7 @@ describe("WebSocket relay — integration tests", () => {
         `ws://localhost:${server.port}/rooms/WAIT01/ws?token=host-token-waiting`,
       );
       await waitForOpen(hostWs);
-      expect(await waitForMessage(hostWs)).toMatchObject({
-        type: "message",
-        sender: "host",
-        content: "Opening context",
-      });
+      // Host no longer receives its own opening message on replay
       const ended = await waitForMessage(hostWs);
       expect(ended).toEqual({ type: "ended", reason: "expired" });
       const close = await waitForClose(hostWs);
@@ -925,19 +918,15 @@ describe("RoomManager timeouts", () => {
     });
 
     expect(accepted).toBe(true);
+    // Host no longer receives its own opening message on replay
     expect(host.sent[0]).toMatchObject({
-      type: "message",
-      sender: "host",
-      content: "Opening context",
-    });
-    expect(host.sent[1]).toMatchObject({
       type: "ack",
       clientMessageId: "prejoin-1",
     });
 
     await Bun.sleep(100);
 
-    expect(host.sent).toHaveLength(2);
+    expect(host.sent).toHaveLength(1);
     expect(host.closed).toHaveLength(0);
 
     const room = db.prepare("SELECT status FROM rooms WHERE id = ?").get("WAIT10") as {

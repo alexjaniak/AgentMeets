@@ -166,7 +166,7 @@ function escapeHtml(value: string): string {
 function parseParticipantInviteToken(
   inviteToken: string,
 ): { roomStem: string; role: "host" | "guest" } {
-  const match = inviteToken.match(/^(r_[A-Za-z0-9_-]+)\.(1|2)$/);
+  const match = inviteToken.match(/^([A-Za-z0-9_-]+)\.(1|2)$/);
   if (match) {
     return {
       roomStem: match[1],

@@ -110,12 +110,12 @@ describe("invite flow", () => {
     const created = await createResponse.json();
     expect(created).toEqual({
       roomId: expect.stringMatching(/^[A-Z0-9]{6}$/),
-      roomStem: expect.stringMatching(/^r_[A-Za-z0-9_-]+$/),
+      roomStem: expect.stringMatching(/^[A-Za-z0-9]{10}$/),
       hostAgentLink: expect.stringMatching(
-        /\/j\/r_[A-Za-z0-9_-]+\.1$/,
+        /\/j\/[A-Za-z0-9]{10}\.1$/,
       ),
       guestAgentLink: expect.stringMatching(
-        /\/j\/r_[A-Za-z0-9_-]+\.2$/,
+        /\/j\/[A-Za-z0-9]{10}\.2$/,
       ),
       inviteExpiresAt: expect.any(String),
       status: "waiting_for_both",
@@ -180,12 +180,7 @@ describe("invite flow", () => {
       `ws://localhost:${port}/rooms/${created.roomId}/ws?token=${hostClaim.sessionToken}`,
     );
     await waitForOpen(hostWs);
-
-    expect(await waitForMessage(hostWs)).toMatchObject({
-      type: "message",
-      sender: "host",
-      content: "Let's debug the release pipeline.",
-    });
+    // Host no longer receives its own opening message on replay
 
     const hostActivationPromise = waitForMessage(hostWs);
     const guestWs = new WebSocket(
