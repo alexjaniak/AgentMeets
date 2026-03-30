@@ -1,14 +1,13 @@
 import type { Server } from "bun";
-import { Database } from "bun:sqlite";
-import { getRoomByToken } from "../db/index.js";
+import type { AgentMeetsStore } from "../db/store.js";
 import type { RoomManager, WsData } from "./room-manager.js";
 
-export function handleUpgrade(
+export async function handleUpgrade(
   req: Request,
   server: Server<WsData>,
-  db: Database,
+  store: AgentMeetsStore,
   roomManager: RoomManager,
-): Response | undefined {
+): Promise<Response | undefined> {
   const url = new URL(req.url);
   const match = url.pathname.match(/^\/rooms\/([^/]+)\/ws$/);
   if (!match) return undefined;
@@ -20,7 +19,7 @@ export function handleUpgrade(
     return new Response("Missing token", { status: 401 });
   }
 
-  const result = getRoomByToken(db, token);
+  const result = await store.getRoomByToken(token);
   if (!result) {
     return new Response("Invalid token or room not found", { status: 401 });
   }
@@ -29,8 +28,8 @@ export function handleUpgrade(
     return new Response("Token does not match room", { status: 401 });
   }
 
-  roomManager.expireIdleRoomIfNeeded(roomId);
-  const refreshedResult = getRoomByToken(db, token);
+  await roomManager.expireIdleRoomIfNeeded(roomId);
+  const refreshedResult = await store.getRoomByToken(token);
   if (!refreshedResult) {
     return new Response("Invalid token or room not found", { status: 401 });
   }

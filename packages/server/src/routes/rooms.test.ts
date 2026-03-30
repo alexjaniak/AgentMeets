@@ -1,18 +1,15 @@
 import { describe, test, expect, beforeEach } from "bun:test";
 import { Hono } from "hono";
-import { Database } from "bun:sqlite";
-import { initializeSchema } from "../db/schema.js";
-import { createRoom, joinRoom, expireRoom, closeRoom } from "../db/rooms.js";
+import { createFakeAgentMeetsStore, type AgentMeetsStore } from "../db/index.js";
 import { roomRoutes } from "./rooms.js";
 
-let db: Database;
+let store: AgentMeetsStore;
 let app: Hono;
 
 beforeEach(() => {
-  db = new Database(":memory:");
-  initializeSchema(db);
+  store = createFakeAgentMeetsStore();
   app = new Hono();
-  app.route("/", roomRoutes(db));
+  app.route("/", roomRoutes(store));
 });
 
 describe("POST /rooms", () => {
@@ -71,24 +68,18 @@ describe("POST /rooms", () => {
 
     expect(res.status).toBe(201);
     const body = await res.json();
-    const room = db
-      .prepare("SELECT id, status, opening_message_id FROM rooms WHERE id = ?")
-      .get(body.roomId) as {
-      id: string;
-      status: string;
-      opening_message_id: number | null;
-    };
+    const room = await store.getRoom(body.roomId);
     expect(room).not.toBeNull();
-    expect(room.status).toBe("waiting");
+    expect(room!.status).toBe("waiting");
 
-    const messages = db
-      .prepare("SELECT id, sender, content FROM messages WHERE room_id = ? ORDER BY id ASC")
-      .all(body.roomId) as Array<{ id: number; sender: string; content: string }>;
+    const messages = await store.getMessages(body.roomId);
     expect(messages).toEqual([
       {
-        id: room.opening_message_id!,
+        id: room!.opening_message_id!,
         sender: "host",
+        room_id: body.roomId,
         content: "Opening hello",
+        created_at: expect.any(String),
       },
     ]);
   });
@@ -107,9 +98,12 @@ describe("POST /rooms", () => {
 
     expect(res.status).toBe(201);
     const body = await res.json();
-    const invites = db
-      .prepare("SELECT participant_role, expires_at FROM invites WHERE room_id = ? ORDER BY participant_role ASC")
-      .all(body.roomId) as Array<{ participant_role: string; expires_at: string }>;
+    const guestInvite = await store.getInviteManifest(`${body.roomStem}.2`);
+    const hostInvite = await store.getInviteManifest(`${body.roomStem}.1`);
+    const invites = [
+      { participant_role: "guest", expires_at: guestInvite.expiresAt },
+      { participant_role: "host", expires_at: hostInvite.expiresAt },
+    ];
 
     expect(invites).toHaveLength(2);
     expect(invites[0].participant_role).toBe("guest");
@@ -140,7 +134,7 @@ describe("POST /rooms", () => {
 
 describe("POST /rooms/:id/join", () => {
   test("returns 200 with guestToken for a waiting room", async () => {
-    createRoom(db, "ABC123", "host-token");
+    await store.createRoom({ id: "ABC123", hostToken: "host-token" });
     const res = await app.request("/rooms/ABC123/join", { method: "POST" });
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -157,8 +151,8 @@ describe("POST /rooms/:id/join", () => {
   });
 
   test("returns 409 for room that already has a guest", async () => {
-    createRoom(db, "ABC123", "host-token");
-    joinRoom(db, "ABC123", "guest-token-1");
+    await store.createRoom({ id: "ABC123", hostToken: "host-token" });
+    await store.joinRoom("ABC123", "guest-token-1");
     const res = await app.request("/rooms/ABC123/join", { method: "POST" });
     expect(res.status).toBe(409);
     const body = await res.json();
@@ -166,8 +160,8 @@ describe("POST /rooms/:id/join", () => {
   });
 
   test("returns 410 for expired room", async () => {
-    createRoom(db, "ABC123", "host-token");
-    expireRoom(db, "ABC123");
+    await store.createRoom({ id: "ABC123", hostToken: "host-token" });
+    await store.expireRoom("ABC123");
     const res = await app.request("/rooms/ABC123/join", { method: "POST" });
     expect(res.status).toBe(410);
     const body = await res.json();
@@ -175,13 +169,25 @@ describe("POST /rooms/:id/join", () => {
   });
 
   test("returns 410 for closed room", async () => {
-    createRoom(db, "ABC123", "host-token");
-    joinRoom(db, "ABC123", "guest-token-1");
-    closeRoom(db, "ABC123", "closed");
+    await store.createRoom({ id: "ABC123", hostToken: "host-token" });
+    await store.joinRoom("ABC123", "guest-token-1");
+    await store.closeRoom("ABC123", "closed");
     const res = await app.request("/rooms/ABC123/join", { method: "POST" });
     expect(res.status).toBe(410);
     const body = await res.json();
     expect(body.error).toBe("room_expired");
+  });
+
+  test("returns 409 when join loses a concurrent race after the route precheck", async () => {
+    await store.createRoom({ id: "ABC123", hostToken: "host-token" });
+    store.joinRoom = async () => {
+      throw new Error("Room is full");
+    };
+
+    const res = await app.request("/rooms/ABC123/join", { method: "POST" });
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error).toBe("room_full");
   });
 
   test("returns 400 for malformed room ID (too short)", async () => {
@@ -206,7 +212,7 @@ describe("POST /rooms/:id/join", () => {
   });
 
   test("rate limits excessive join attempts", async () => {
-    createRoom(db, "ABC123", "host-token");
+    await store.createRoom({ id: "ABC123", hostToken: "host-token" });
 
     // First 10 attempts should not be rate limited (room will be full after 1st)
     for (let i = 0; i < 10; i++) {
@@ -229,7 +235,7 @@ describe("POST /rooms/:id/join", () => {
   });
 
   test("rate limit is per-IP", async () => {
-    createRoom(db, "ABC123", "host-token");
+    await store.createRoom({ id: "ABC123", hostToken: "host-token" });
 
     // Exhaust rate limit for IP 1.2.3.4
     for (let i = 0; i < 11; i++) {

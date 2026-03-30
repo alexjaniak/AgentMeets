@@ -1,17 +1,19 @@
 import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import type { Database } from "bun:sqlite";
-import { claimInvite, getInviteManifest, InviteError } from "../db/index.js";
+import {
+  type AgentMeetsStore,
+  InviteError,
+} from "../db/store.js";
 
-export function inviteRoutes(db: Database): Hono {
+export function inviteRoutes(store: AgentMeetsStore): Hono {
   const router = new Hono();
 
-  router.get("/j/:inviteToken", (c) => {
+  router.get("/j/:inviteToken", async (c) => {
     const inviteToken = c.req.param("inviteToken");
     const parsedToken = parseParticipantInviteToken(inviteToken);
 
     try {
-      const manifest = getInviteManifest(db, inviteToken);
+      const manifest = await store.getInviteManifest(inviteToken);
 
       if (acceptsHtml(c.req.header("accept"))) {
         return c.html(
@@ -55,14 +57,14 @@ export function inviteRoutes(db: Database): Hono {
     }
   });
 
-  router.post("/invites/:inviteToken/claim", (c) => {
+  router.post("/invites/:inviteToken/claim", async (c) => {
     const idempotencyKey = c.req.header("Idempotency-Key")?.trim();
     if (!idempotencyKey) {
       return c.json({ error: "missing_idempotency_key" }, 400);
     }
 
     try {
-      const result = claimInvite(db, c.req.param("inviteToken"), idempotencyKey);
+      const result = await store.claimInvite(c.req.param("inviteToken"), idempotencyKey);
       return c.json(
         {
           roomId: result.roomId,

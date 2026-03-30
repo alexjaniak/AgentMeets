@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { Database } from "bun:sqlite";
 import { Hono } from "hono";
 import type { ServerMessage } from "@agentmeets/shared";
-import { initializeSchema } from "../../src/db/schema.js";
+import {
+  createFakeAgentMeetsStore,
+  type AgentMeetsStore,
+} from "../../src/db/index.js";
 import { RoomManager } from "../../src/ws/room-manager.js";
 import { createWebSocketHandlers } from "../../src/ws/handler.js";
 import { handleUpgrade } from "../../src/ws/upgrade.js";
@@ -10,7 +12,7 @@ import type { WsData } from "../../src/ws/room-manager.js";
 import { roomRoutes } from "../../src/routes/rooms.js";
 import { inviteRoutes } from "../../src/routes/invites.js";
 
-let db: Database;
+let store: AgentMeetsStore;
 let app: Hono;
 let server: ReturnType<typeof Bun.serve>;
 let roomManager: RoomManager;
@@ -18,8 +20,8 @@ let port: number;
 
 async function buildApp(): Promise<Hono> {
   const nextApp = new Hono();
-  nextApp.route("/", roomRoutes(db));
-  nextApp.route("/", inviteRoutes(db));
+  nextApp.route("/", roomRoutes(store));
+  nextApp.route("/", inviteRoutes(store));
   return nextApp;
 }
 
@@ -65,15 +67,14 @@ function waitForMessage(ws: WebSocket): Promise<ServerMessage> {
 }
 
 beforeEach(async () => {
-  db = new Database(":memory:");
-  initializeSchema(db);
+  store = createFakeAgentMeetsStore();
   app = await buildApp();
-  roomManager = new RoomManager(db);
+  roomManager = new RoomManager(store);
   const wsHandlers = createWebSocketHandlers(roomManager);
   server = Bun.serve<WsData>({
     port: 0,
-    fetch(req, srv) {
-      const upgradeResponse = handleUpgrade(req, srv, db, roomManager);
+    async fetch(req, srv) {
+      const upgradeResponse = await handleUpgrade(req, srv, store, roomManager);
       if (upgradeResponse) {
         return upgradeResponse;
       }
@@ -93,7 +94,6 @@ beforeEach(async () => {
 afterEach(() => {
   roomManager.shutdown();
   server.stop(true);
-  db.close();
 });
 
 describe("invite flow", () => {
@@ -161,20 +161,13 @@ describe("invite flow", () => {
       status: "waiting_for_both",
     });
 
-    const roomRow = db
-      .prepare("SELECT room_stem, host_token, guest_token, joined_at, status FROM rooms WHERE id = ?")
-      .get(created.roomId) as {
-      room_stem: string | null;
-      host_token: string | null;
-      guest_token: string | null;
-      joined_at: string | null;
-      status: string;
-    };
-    expect(roomRow.room_stem).toBe(created.roomStem);
-    expect(roomRow.host_token).toBe(hostClaim.sessionToken);
-    expect(roomRow.guest_token).toBe(guestClaim.sessionToken);
-    expect(roomRow.joined_at).toBeNull();
-    expect(roomRow.status).toBe("waiting");
+    const roomRow = await store.getRoom(created.roomId);
+    expect(roomRow).not.toBeNull();
+    expect(roomRow!.room_stem).toBe(created.roomStem);
+    expect(roomRow!.host_token).toBe(hostClaim.sessionToken);
+    expect(roomRow!.guest_token).toBe(guestClaim.sessionToken);
+    expect(roomRow!.joined_at).toBeNull();
+    expect(roomRow!.status).toBe("waiting");
 
     const hostWs = new WebSocket(
       `ws://localhost:${port}/rooms/${created.roomId}/ws?token=${hostClaim.sessionToken}`,
@@ -208,18 +201,12 @@ describe("invite flow", () => {
       expiresAt: expect.any(String),
     });
 
-    const activatedRoomRow = db
-      .prepare("SELECT host_token, guest_token, joined_at, status FROM rooms WHERE id = ?")
-      .get(created.roomId) as {
-      host_token: string | null;
-      guest_token: string | null;
-      joined_at: string | null;
-      status: string;
-    };
-    expect(activatedRoomRow.host_token).toBe(hostClaim.sessionToken);
-    expect(activatedRoomRow.guest_token).toBe(guestClaim.sessionToken);
-    expect(activatedRoomRow.joined_at).toEqual(expect.any(String));
-    expect(activatedRoomRow.status).toBe("active");
+    const activatedRoomRow = await store.getRoom(created.roomId);
+    expect(activatedRoomRow).not.toBeNull();
+    expect(activatedRoomRow!.host_token).toBe(hostClaim.sessionToken);
+    expect(activatedRoomRow!.guest_token).toBe(guestClaim.sessionToken);
+    expect(activatedRoomRow!.joined_at).toEqual(expect.any(String));
+    expect(activatedRoomRow!.status).toBe("active");
 
     hostWs.close();
     guestWs.close();
@@ -239,7 +226,10 @@ describe("invite flow", () => {
     const createResponse = await fetch(`${baseUrl}/rooms`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ openingMessage: "This invite should expire before bootstrap." }),
+      body: JSON.stringify({
+        openingMessage: "This invite should expire before bootstrap.",
+        inviteTtlSeconds: 1,
+      }),
     });
     expect(createResponse.status).toBe(201);
 
@@ -250,10 +240,7 @@ describe("invite flow", () => {
     };
     const guestInviteToken = new URL(created.guestAgentLink).pathname.split("/").pop()!;
 
-    db.prepare("UPDATE invites SET expires_at = ? WHERE room_id = ?").run(
-      new Date(Date.now() - 60_000).toISOString(),
-      created.roomId,
-    );
+    await Bun.sleep(1_100);
 
     const expiredManifest = await fetch(`${baseUrl}/j/${guestInviteToken}`);
     expect(expiredManifest.status).toBe(410);

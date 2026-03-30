@@ -6,7 +6,10 @@ export function createWebSocketHandlers(roomManager: RoomManager) {
   return {
     open(ws: ServerWebSocket<WsData>) {
       const { roomId, role } = ws.data;
-      roomManager.addConnection(roomId, role, ws);
+      void roomManager.addConnection(roomId, role, ws).catch((error) => {
+        console.error("WebSocket open failed", error);
+        ws.close(1011, "Connection failed");
+      });
     },
 
     message(ws: ServerWebSocket<WsData>, raw: string | Buffer) {
@@ -28,16 +31,23 @@ export function createWebSocketHandlers(roomManager: RoomManager) {
           return;
         }
 
-        const ok = roomManager.handleMessage(roomId, role, {
+        void roomManager.handleMessage(roomId, role, {
           clientMessageId: msg.clientMessageId,
-          replyToMessageId: msg.replyToMessageId ?? null,
+          replyToMessageId: msg.replyToMessageId,
           content: msg.content,
+        }).then((ok) => {
+          if (!ok) {
+            ws.close(1009, "Message too large");
+          }
+        }).catch((error) => {
+          console.error("WebSocket message failed", error);
+          ws.close(1011, "Message handling failed");
         });
-        if (!ok) {
-          ws.close(1009, "Message too large");
-        }
       } else if (msg.type === "end") {
-        roomManager.handleEnd(roomId, role);
+        void roomManager.handleEnd(roomId, role).catch((error) => {
+          console.error("WebSocket end failed", error);
+          ws.close(1011, "End handling failed");
+        });
       } else {
         sendProtocolError(ws, "unknown_message_type", "Unknown message type");
       }
@@ -47,7 +57,9 @@ export function createWebSocketHandlers(roomManager: RoomManager) {
       const { roomId, role } = ws.data;
       if (roomManager.hasRoom(roomId) && roomManager.getConnection(roomId, role) === ws) {
         roomManager.removeConnection(roomId, role);
-        roomManager.handleDisconnect(roomId, role);
+        void roomManager.handleDisconnect(roomId, role).catch((error) => {
+          console.error("WebSocket disconnect failed", error);
+        });
       }
     },
   };

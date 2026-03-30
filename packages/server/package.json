@@ -11,9 +11,11 @@
   "dependencies": {
     "@agentmeets/shared": "workspace:*",
     "hono": "^4.0.0",
-    "nanoid": "^5.0.9"
+    "nanoid": "^5.0.9",
+    "pg": "^8.20.0"
   },
   "devDependencies": {
+    "@types/pg": "^8.15.6",
     "@types/bun": "latest",
     "bun-types": "latest",
     "typescript": "^5.7.0"

@@ -1,32 +1,27 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { Database } from "bun:sqlite";
 import { Hono } from "hono";
-import { initializeSchema } from "../db/schema.js";
-import { createInvite } from "../db/invites.js";
-import { closeRoom, createRoom, expireRoom, joinRoom } from "../db/rooms.js";
+import { createFakeAgentMeetsStore, type AgentMeetsStore } from "../db/index.js";
 import { publicRoomRoutes } from "./public-rooms.js";
 
-let db: Database;
+let store: AgentMeetsStore;
 let app: Hono;
 
 beforeEach(() => {
-  db = new Database(":memory:");
-  initializeSchema(db);
+  store = createFakeAgentMeetsStore();
   app = new Hono();
-  app.route("/", publicRoomRoutes(db));
+  app.route("/", publicRoomRoutes(store));
 });
 
 describe("GET /public/rooms/:roomStem", () => {
   test("returns browser-safe room instructions while the room is still joinable", async () => {
-    createRoom(
-      db,
-      "ROOM01",
-      "host-token-123",
-      "Can you inspect auth?",
-      "r_9wK3mQvH8",
-    );
-    createInvite(db, "ROOM01", "r_9wK3mQvH8.1", "2099-03-24 12:05:00");
-    createInvite(db, "ROOM01", "r_9wK3mQvH8.2", "2099-03-24 12:05:00");
+    await store.createRoom({
+      id: "ROOM01",
+      hostToken: "host-token-123",
+      openingMessage: "Can you inspect auth?",
+      roomStem: "r_9wK3mQvH8",
+    });
+    await store.createInvite("ROOM01", "r_9wK3mQvH8.1", "2099-03-24 12:05:00");
+    await store.createInvite("ROOM01", "r_9wK3mQvH8.2", "2099-03-24 12:05:00");
 
     const res = await app.request("/public/rooms/r_9wK3mQvH8");
     expect(res.status).toBe(200);
@@ -41,14 +36,13 @@ describe("GET /public/rooms/:roomStem", () => {
   });
 
   test("returns 410 after the room expires", async () => {
-    createRoom(
-      db,
-      "ROOM01",
-      "host-token-123",
-      "Can you inspect auth?",
-      "r_9wK3mQvH8",
-    );
-    expireRoom(db, "ROOM01");
+    await store.createRoom({
+      id: "ROOM01",
+      hostToken: "host-token-123",
+      openingMessage: "Can you inspect auth?",
+      roomStem: "r_9wK3mQvH8",
+    });
+    await store.expireRoom("ROOM01");
 
     const res = await app.request("/public/rooms/r_9wK3mQvH8");
     expect(res.status).toBe(410);
@@ -56,16 +50,15 @@ describe("GET /public/rooms/:roomStem", () => {
   });
 
   test("returns room details while active even after invite expiry", async () => {
-    createRoom(
-      db,
-      "ROOM01",
-      "host-token-123",
-      "Can you inspect auth?",
-      "r_9wK3mQvH8",
-    );
-    createInvite(db, "ROOM01", "r_9wK3mQvH8.1", "2000-03-24 12:05:00");
-    createInvite(db, "ROOM01", "r_9wK3mQvH8.2", "2000-03-24 12:05:00");
-    joinRoom(db, "ROOM01", "guest-token-123");
+    await store.createRoom({
+      id: "ROOM01",
+      hostToken: "host-token-123",
+      openingMessage: "Can you inspect auth?",
+      roomStem: "r_9wK3mQvH8",
+    });
+    await store.createInvite("ROOM01", "r_9wK3mQvH8.1", "2000-03-24 12:05:00");
+    await store.createInvite("ROOM01", "r_9wK3mQvH8.2", "2000-03-24 12:05:00");
+    await store.joinRoom("ROOM01", "guest-token-123");
 
     const res = await app.request("/public/rooms/r_9wK3mQvH8");
     expect(res.status).toBe(200);
@@ -80,17 +73,16 @@ describe("GET /public/rooms/:roomStem", () => {
   });
 
   test("returns ended status after the room has ended", async () => {
-    createRoom(
-      db,
-      "ROOM01",
-      "host-token-123",
-      "Can you inspect auth?",
-      "r_9wK3mQvH8",
-    );
-    createInvite(db, "ROOM01", "r_9wK3mQvH8.1", "2099-03-24 12:05:00");
-    createInvite(db, "ROOM01", "r_9wK3mQvH8.2", "2099-03-24 12:05:00");
-    joinRoom(db, "ROOM01", "guest-token-123");
-    closeRoom(db, "ROOM01", "closed");
+    await store.createRoom({
+      id: "ROOM01",
+      hostToken: "host-token-123",
+      openingMessage: "Can you inspect auth?",
+      roomStem: "r_9wK3mQvH8",
+    });
+    await store.createInvite("ROOM01", "r_9wK3mQvH8.1", "2099-03-24 12:05:00");
+    await store.createInvite("ROOM01", "r_9wK3mQvH8.2", "2099-03-24 12:05:00");
+    await store.joinRoom("ROOM01", "guest-token-123");
+    await store.closeRoom("ROOM01", "closed");
 
     const res = await app.request("/public/rooms/r_9wK3mQvH8");
     expect(res.status).toBe(200);

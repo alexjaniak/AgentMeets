@@ -1,5 +1,8 @@
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, test, expect, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
+import type { StoredRoom } from "@agentmeets/shared";
 import { initializeSchema } from "./schema.js";
 import {
   createRoom,
@@ -26,6 +29,14 @@ beforeEach(() => {
   db = new Database(":memory:");
   initializeSchema(db);
 });
+
+const inniesMigrationRoot = resolveInniesMigrationRoot();
+const inniesMigrationPaths = inniesMigrationRoot
+  ? [
+      path.join(inniesMigrationRoot, "docs/migrations/025_agentmeets_postgres_storage.sql"),
+      path.join(inniesMigrationRoot, "docs/migrations/025_agentmeets_postgres_storage_no_extensions.sql"),
+    ]
+  : [];
 
 describe("schema", () => {
   test("creates tables on initialization", () => {
@@ -396,3 +407,129 @@ describe("generateToken", () => {
     expect(tokens.size).toBe(100);
   });
 });
+
+describe("postgres storage cutover prep", () => {
+  test.if(inniesMigrationPaths.length > 0)("agentmeets storage migrations grant niyant access", () => {
+    for (const migrationPath of inniesMigrationPaths) {
+      const sql = readFileSync(migrationPath, "utf8");
+
+      expect(sql).toContain("CREATE TABLE IF NOT EXISTS am_rooms");
+      expect(sql).toContain("CREATE TABLE IF NOT EXISTS am_messages");
+      expect(sql).toContain("CREATE TABLE IF NOT EXISTS am_invites");
+      expect(sql).toContain("GRANT ALL PRIVILEGES ON TABLE am_rooms TO niyant;");
+      expect(sql).toContain("GRANT ALL PRIVILEGES ON TABLE am_messages TO niyant;");
+      expect(sql).toContain("GRANT ALL PRIVILEGES ON TABLE am_invites TO niyant;");
+      expect(sql).toContain("GRANT ALL PRIVILEGES ON SEQUENCE am_messages_id_seq TO niyant;");
+      expect(sql).toContain("GRANT ALL PRIVILEGES ON SEQUENCE am_invites_id_seq TO niyant;");
+    }
+  });
+
+  test("async storage seam preserves opening message linkage", async () => {
+    const { createFakeAgentMeetsStore } = await import("./fake-store.js");
+    const store = createFakeAgentMeetsStore();
+
+    const room = await store.createRoom({
+      id: "ABC123",
+      roomStem: "r_9wK3mQvH8",
+      hostToken: "host-token-1",
+      openingMessage: "Opening hello",
+    });
+
+    expect(room.opening_message_id).toEqual(expect.any(Number));
+
+    const messages = await store.getMessages("ABC123");
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({
+      room_id: "ABC123",
+      sender: "host",
+      content: "Opening hello",
+    });
+  });
+});
+
+describe("postgres store bootstrap", () => {
+  test("postgres bootstrap requires DATABASE_URL", async () => {
+    const { readDatabaseUrl } = await import("./pg.js");
+    expect(() => readDatabaseUrl({})).toThrow("DATABASE_URL");
+  });
+
+  test("postgres store exports a factory", async () => {
+    const { createPostgresAgentMeetsStore } = await import("./pg-store.js");
+    expect(typeof createPostgresAgentMeetsStore).toBe("function");
+  });
+
+  test("postgres joinRoom treats a concurrent guest claim as room full", async () => {
+    const { createPostgresAgentMeetsStore } = await import("./pg-store.js");
+
+    const fullRoom = createStoredRoomRow({
+      guest_token: "guest-token-1",
+      status: "active",
+      joined_at: "2026-03-30T00:00:01.000Z",
+      guest_connected_at: "2026-03-30T00:00:01.000Z",
+    });
+
+    const fakePool = {
+      async query(text: string) {
+        if (text.includes("SELECT *") && text.includes("FROM am_rooms")) {
+          return {
+            rowCount: 1,
+            rows: [fullRoom],
+          };
+        }
+
+        if (text.includes("UPDATE am_rooms")) {
+          expect(text).toContain("guest_token IS NULL");
+          expect(text).toContain("status = 'waiting'");
+          return {
+            rowCount: 0,
+            rows: [],
+          };
+        }
+
+        throw new Error(`Unexpected query: ${text}`);
+      },
+    };
+
+    const store = createPostgresAgentMeetsStore({ pool: fakePool as any });
+    await expect(store.joinRoom("ABC123", "guest-token-2")).rejects.toThrow("Room is full");
+  });
+});
+
+function resolveInniesMigrationRoot(): string | null {
+  const candidates = [
+    process.env.INNIES_REPO_PATH?.trim(),
+    path.resolve(import.meta.dir, "../../../../../../../innies"),
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate) {
+      continue;
+    }
+    if (existsSync(path.join(candidate, "docs/migrations"))) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+function createStoredRoomRow(
+  overrides: Partial<StoredRoom> = {},
+): StoredRoom {
+  return {
+    id: "ABC123",
+    room_stem: "r_9wK3mQvH8",
+    host_token: "host-token-1",
+    guest_token: null,
+    status: "waiting",
+    opening_message_id: null,
+    host_connected_at: "2026-03-30T00:00:00.000Z",
+    guest_connected_at: null,
+    created_at: "2026-03-30T00:00:00.000Z",
+    last_activity_at: "2026-03-30T00:00:00.000Z",
+    joined_at: null,
+    closed_at: null,
+    close_reason: null,
+    ...overrides,
+  };
+}

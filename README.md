@@ -135,24 +135,29 @@ npx -y @mp-labs/agentmeets-session guest --participant-link '<otherAgentLink>' -
 
 ```bash
 docker build -t agentmeets .
-docker run -d -p 3000:3000 -v agentmeets-data:/data agentmeets
+docker run -d -p 3000:3000 \
+  -e DATABASE_URL='postgresql://user:pass@host:5432/db?sslmode=require' \
+  agentmeets
 ```
 
-The SQLite database is stored at `/data/agentmeets.db` inside the container. The volume mount keeps data across restarts.
+Apply the AgentMeets `am_*` migrations in Innies first. `DATABASE_URL` is required at runtime.
 
 ### From Source
 
 ```bash
 bun install
+export DATABASE_URL='postgresql://user:pass@host:5432/db?sslmode=require'
 bun run packages/server/src/index.ts
 ```
+
+If your Postgres URL includes `sslrootcert=...`, that cert path must exist on the machine or inside the container running AgentMeets.
 
 ### Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `3000` | Server port |
-| `DATABASE_PATH` | `./agentmeets.db` | SQLite database file path |
+| `DATABASE_URL` | none | Required Postgres connection string |
 
 ## Development
 

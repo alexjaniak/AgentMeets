@@ -1,18 +1,16 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { Database } from "bun:sqlite";
 import type { Room, Sender, StoredRoom, ServerMessage } from "@agentmeets/shared";
-import { initializeSchema } from "../src/db/schema.js";
-import { createRoom, joinRoom, closeRoom, getRoomByToken } from "../src/db/rooms.js";
-import { claimInvite, createInvite } from "../src/db/invites.js";
+import {
+  createFakeAgentMeetsStore,
+  type AgentMeetsStore,
+} from "../src/db/index.js";
 import { RoomManager } from "../src/ws/room-manager.js";
 import { createWebSocketHandlers } from "../src/ws/handler.js";
 import { handleUpgrade } from "../src/ws/upgrade.js";
 import type { WsData } from "../src/ws/room-manager.js";
 
-function createTestDb(): Database {
-  const db = new Database(":memory:");
-  initializeSchema(db);
-  return db;
+function createTestStore(): AgentMeetsStore {
+  return createFakeAgentMeetsStore();
 }
 
 const _publicRoomContractCheck = {
@@ -29,9 +27,9 @@ const _publicRoomContractCheck = {
   close_reason: null,
 } satisfies Room;
 
-function setupRoom(db: Database): StoredRoom {
-  const room = createRoom(db, "ROOM01", "host-token-123");
-  return joinRoom(db, "ROOM01", "guest-token-456");
+async function setupRoom(store: AgentMeetsStore): Promise<StoredRoom> {
+  await store.createRoom({ id: "ROOM01", hostToken: "host-token-123" });
+  return store.joinRoom("ROOM01", "guest-token-456");
 }
 
 function roomActive(roomId: string) {
@@ -144,20 +142,20 @@ function createFakeServerSocket() {
 
 describe("WebSocket relay — integration tests", () => {
   let server: ReturnType<typeof Bun.serve>;
-  let db: Database;
+  let store: AgentMeetsStore;
   let roomManager: RoomManager;
   let port: number;
 
-  beforeEach(() => {
-    db = createTestDb();
-    setupRoom(db);
-    roomManager = new RoomManager(db);
+  beforeEach(async () => {
+    store = createTestStore();
+    await setupRoom(store);
+    roomManager = new RoomManager(store);
     const wsHandlers = createWebSocketHandlers(roomManager);
 
     server = Bun.serve<WsData>({
       port: 0,
-      fetch(req, srv) {
-        const upgradeResp = handleUpgrade(req, srv, db, roomManager);
+      async fetch(req, srv) {
+        const upgradeResp = await handleUpgrade(req, srv, store, roomManager);
         if (upgradeResp) return upgradeResp;
 
         const url = new URL(req.url);
@@ -174,7 +172,6 @@ describe("WebSocket relay — integration tests", () => {
   afterEach(() => {
     roomManager.cleanupRoom("ROOM01");
     server.stop(true);
-    db.close();
   });
 
   function connectAs(token: string, roomId = "ROOM01"): WebSocket {
@@ -221,12 +218,16 @@ describe("WebSocket relay — integration tests", () => {
 
   test("guest receives the persisted opening message immediately before activation", async () => {
     const roomId = "ROOM02";
-    createRoom(db, roomId, "host-token-789", "Welcome to the relay.");
-    db.prepare("UPDATE rooms SET guest_token = ? WHERE id = ?").run(
-      "guest-token-987",
-      roomId,
-    );
-    const guestWs = connectAs("guest-token-987", roomId);
+    await store.createRoom({
+      id: roomId,
+      hostToken: "host-token-789",
+      openingMessage: "Welcome to the relay.",
+      roomStem: "r_room02",
+    });
+    await store.createInvite(roomId, "r_room02.1", "2099-03-24T12:05:00.000Z");
+    await store.createInvite(roomId, "r_room02.2", "2099-03-24T12:05:00.000Z");
+    const guestClaim = await store.claimInvite("r_room02.2", "room02-guest-claim");
+    const guestWs = connectAs(guestClaim.sessionToken, roomId);
     await waitForOpen(guestWs);
 
     const replay = (await waitForMessage(guestWs, 250)) as Record<string, unknown>;
@@ -247,11 +248,15 @@ describe("WebSocket relay — integration tests", () => {
 
   test("guest receives all persisted host messages that were accepted before activation", async () => {
     const roomId = "ROOM03";
-    createRoom(db, roomId, "host-token-790", "Opening context.");
-    db.prepare("UPDATE rooms SET guest_token = ? WHERE id = ?").run(
-      "guest-token-988",
-      roomId,
-    );
+    await store.createRoom({
+      id: roomId,
+      hostToken: "host-token-790",
+      openingMessage: "Opening context.",
+      roomStem: "r_room03",
+    });
+    await store.createInvite(roomId, "r_room03.1", "2099-03-24T12:05:00.000Z");
+    await store.createInvite(roomId, "r_room03.2", "2099-03-24T12:05:00.000Z");
+    const guestClaim = await store.claimInvite("r_room03.2", "room03-guest-claim");
 
     const hostWs = connectAs("host-token-790", roomId);
     await waitForOpen(hostWs);
@@ -275,7 +280,7 @@ describe("WebSocket relay — integration tests", () => {
     });
 
     const hostActivationPromise = waitForMessage(hostWs);
-    const guestWs = connectAs("guest-token-988", roomId);
+    const guestWs = connectAs(guestClaim.sessionToken, roomId);
     const guestMessagesPromise = waitForMessages(guestWs, 3);
     await waitForOpen(guestWs);
 
@@ -300,13 +305,17 @@ describe("WebSocket relay — integration tests", () => {
 
   test("host replays the opening message first when guest drafts before host attach", async () => {
     const roomId = "ROOM04";
-    createRoom(db, roomId, "host-token-791", "Opening message from the room creator.");
-    db.prepare("UPDATE rooms SET guest_token = ? WHERE id = ?").run(
-      "guest-token-989",
-      roomId,
-    );
+    await store.createRoom({
+      id: roomId,
+      hostToken: "host-token-791",
+      openingMessage: "Opening message from the room creator.",
+      roomStem: "r_room04",
+    });
+    await store.createInvite(roomId, "r_room04.1", "2099-03-24T12:05:00.000Z");
+    await store.createInvite(roomId, "r_room04.2", "2099-03-24T12:05:00.000Z");
+    const guestClaim = await store.claimInvite("r_room04.2", "room04-guest-claim");
 
-    const guestWs = connectAs("guest-token-989", roomId);
+    const guestWs = connectAs(guestClaim.sessionToken, roomId);
     await waitForOpen(guestWs);
 
     const openingReplay = (await waitForMessage(guestWs, 250)) as Record<string, unknown>;
@@ -399,9 +408,7 @@ describe("WebSocket relay — integration tests", () => {
     expect(typeof msg.createdAt).toBe("string");
 
     // Verify message was persisted in DB
-    const messages = db
-      .prepare("SELECT * FROM messages WHERE room_id = ?")
-      .all("ROOM01") as Array<{ sender: string; content: string }>;
+    const messages = await store.getMessages("ROOM01");
     expect(messages).toHaveLength(1);
     expect(messages[0].sender).toBe("host");
     expect(messages[0].content).toBe("hello guest");
@@ -497,9 +504,10 @@ describe("WebSocket relay — integration tests", () => {
     expect(msg).toEqual({ type: "ended", reason: "user_ended" });
 
     // Verify room was closed in DB
-    const room = db.prepare("SELECT * FROM rooms WHERE id = ?").get("ROOM01") as StoredRoom;
-    expect(room.status).toBe("closed");
-    expect(room.close_reason).toBe("user_ended");
+    const room = await store.getRoom("ROOM01");
+    expect(room).not.toBeNull();
+    expect(room!.status).toBe("closed");
+    expect(room!.close_reason).toBe("user_ended");
   });
 
   test("end from guest notifies host", async () => {
@@ -521,27 +529,30 @@ describe("WebSocket relay — integration tests", () => {
   });
 
   test("waiting rooms expire with reason expired when their invite TTL elapses", async () => {
-    const db = createTestDb();
-    createRoom(db, "WAIT01", "host-token-waiting", "Opening context", "r_waiting");
-    createInvite(
-      db,
+    const store = createTestStore();
+    await store.createRoom({
+      id: "WAIT01",
+      hostToken: "host-token-waiting",
+      openingMessage: "Opening context",
+      roomStem: "r_waiting",
+    });
+    await store.createInvite(
       "WAIT01",
       "r_waiting.1",
       new Date(Date.now() + 50).toISOString(),
     );
-    createInvite(
-      db,
+    await store.createInvite(
       "WAIT01",
       "r_waiting.2",
       new Date(Date.now() + 50).toISOString(),
     );
-    const roomManager = new RoomManager(db);
+    const roomManager = new RoomManager(store);
     const wsHandlers = createWebSocketHandlers(roomManager);
 
     const server = Bun.serve<WsData>({
       port: 0,
-      fetch(req, srv) {
-        const upgradeResp = handleUpgrade(req, srv, db, roomManager);
+      async fetch(req, srv) {
+        const upgradeResp = await handleUpgrade(req, srv, store, roomManager);
         if (upgradeResp) return upgradeResp;
         const url = new URL(req.url);
         if (url.pathname.match(/^\/rooms\/[^/]+\/ws$/)) {
@@ -563,16 +574,13 @@ describe("WebSocket relay — integration tests", () => {
       const close = await waitForClose(hostWs);
       expect(close.reason).toBe("Room expired");
 
-      const room = db.prepare("SELECT status, close_reason FROM rooms WHERE id = ?").get("WAIT01") as {
-        status: StoredRoom["status"];
-        close_reason: StoredRoom["close_reason"];
-      };
-      expect(room.status).toBe("expired");
-      expect(room.close_reason).toBeNull();
+      const room = await store.getRoom("WAIT01");
+      expect(room).not.toBeNull();
+      expect(room!.status).toBe("expired");
+      expect(room!.close_reason).toBeNull();
     } finally {
       roomManager.cleanupRoom("WAIT01");
       server.stop(true);
-      db.close();
     }
   });
 
@@ -593,9 +601,10 @@ describe("WebSocket relay — integration tests", () => {
     const close = await closePromise;
     expect(close.reason).toBe("disconnected");
 
-    const room = db.prepare("SELECT status, close_reason FROM rooms WHERE id = ?").get("ROOM01") as StoredRoom;
-    expect(room.status).toBe("closed");
-    expect(room.close_reason).toBe("disconnected");
+    const room = await store.getRoom("ROOM01");
+    expect(room).not.toBeNull();
+    expect(room!.status).toBe("closed");
+    expect(room!.close_reason).toBe("disconnected");
   });
 
   test("guest disconnect closes the active host with reason disconnected", async () => {
@@ -615,9 +624,10 @@ describe("WebSocket relay — integration tests", () => {
     const close = await closePromise;
     expect(close.reason).toBe("disconnected");
 
-    const room = db.prepare("SELECT status, close_reason FROM rooms WHERE id = ?").get("ROOM01") as StoredRoom;
-    expect(room.status).toBe("closed");
-    expect(room.close_reason).toBe("disconnected");
+    const room = await store.getRoom("ROOM01");
+    expect(room).not.toBeNull();
+    expect(room!.status).toBe("closed");
+    expect(room!.close_reason).toBe("disconnected");
   });
 
   test("message size limit is enforced", async () => {
@@ -692,7 +702,7 @@ describe("WebSocket relay — integration tests", () => {
   });
 
   test("rejects connection to closed room", async () => {
-    closeRoom(db, "ROOM01", "closed");
+    await store.closeRoom("ROOM01", "closed");
 
     const ws = connectAs("host-token-123");
     const close = await waitForClose(ws);
@@ -702,15 +712,15 @@ describe("WebSocket relay — integration tests", () => {
 
 describe("RoomManager timeouts", () => {
   test("waiting rooms are tracked after the first helper connects", async () => {
-    const db = createTestDb();
-    setupRoom(db);
-    const roomManager = new RoomManager(db);
+    const store = createTestStore();
+    await setupRoom(store);
+    const roomManager = new RoomManager(store);
     const wsHandlers = createWebSocketHandlers(roomManager);
 
     const server = Bun.serve<WsData>({
       port: 0,
-      fetch(req, srv) {
-        const upgradeResp = handleUpgrade(req, srv, db, roomManager);
+      async fetch(req, srv) {
+        const upgradeResp = await handleUpgrade(req, srv, store, roomManager);
         if (upgradeResp) return upgradeResp;
         const url = new URL(req.url);
         if (url.pathname.match(/^\/rooms\/[^/]+\/ws$/)) {
@@ -731,20 +741,19 @@ describe("RoomManager timeouts", () => {
     } finally {
       roomManager.cleanupRoom("ROOM01");
       server.stop(true);
-      db.close();
     }
   });
 
   test("idle timeout is reset on message exchange", async () => {
-    const db = createTestDb();
-    setupRoom(db);
-    const roomManager = new RoomManager(db);
+    const store = createTestStore();
+    await setupRoom(store);
+    const roomManager = new RoomManager(store);
     const wsHandlers = createWebSocketHandlers(roomManager);
 
     const server = Bun.serve<WsData>({
       port: 0,
-      fetch(req, srv) {
-        const upgradeResp = handleUpgrade(req, srv, db, roomManager);
+      async fetch(req, srv) {
+        const upgradeResp = await handleUpgrade(req, srv, store, roomManager);
         if (upgradeResp) return upgradeResp;
         const url = new URL(req.url);
         if (url.pathname.match(/^\/rooms\/[^/]+\/ws$/)) {
@@ -795,20 +804,19 @@ describe("RoomManager timeouts", () => {
     } finally {
       roomManager.cleanupRoom("ROOM01");
       server.stop(true);
-      db.close();
     }
   });
 
   test("idle timeout expires an active room with reason expired", async () => {
-    const db = createTestDb();
-    setupRoom(db);
-    const roomManager = new RoomManager(db, { idleTimeoutMs: 50 });
+    const store = createTestStore();
+    await setupRoom(store);
+    const roomManager = new RoomManager(store, { idleTimeoutMs: 50 });
     const wsHandlers = createWebSocketHandlers(roomManager);
 
     const server = Bun.serve<WsData>({
       port: 0,
-      fetch(req, srv) {
-        const upgradeResp = handleUpgrade(req, srv, db, roomManager);
+      async fetch(req, srv) {
+        const upgradeResp = await handleUpgrade(req, srv, store, roomManager);
         if (upgradeResp) return upgradeResp;
         const url = new URL(req.url);
         if (url.pathname.match(/^\/rooms\/[^/]+\/ws$/)) {
@@ -835,33 +843,27 @@ describe("RoomManager timeouts", () => {
       expect(await waitForMessage(hostWs)).toEqual({ type: "ended", reason: "expired" });
       expect(await waitForMessage(guestWs)).toEqual({ type: "ended", reason: "expired" });
 
-      const room = db.prepare("SELECT status, closed_at, close_reason FROM rooms WHERE id = ?").get(
-        "ROOM01",
-      ) as {
-        status: StoredRoom["status"];
-        closed_at: string | null;
-        close_reason: StoredRoom["close_reason"];
-      };
-      expect(room.status).toBe("expired");
-      expect(room.closed_at).toEqual(expect.any(String));
-      expect(room.close_reason).toBeNull();
+      const room = await store.getRoom("ROOM01");
+      expect(room).not.toBeNull();
+      expect(room!.status).toBe("expired");
+      expect(room!.closed_at).toEqual(expect.any(String));
+      expect(room!.close_reason).toBeNull();
     } finally {
       roomManager.cleanupRoom("ROOM01");
       server.stop(true);
-      db.close();
     }
   });
 
   test("legacy joined rooms use idle expiry even before the second socket connects", async () => {
-    const db = createTestDb();
-    setupRoom(db);
-    const roomManager = new RoomManager(db, { idleTimeoutMs: 50 });
+    const store = createTestStore();
+    await setupRoom(store);
+    const roomManager = new RoomManager(store, { idleTimeoutMs: 50 });
     const wsHandlers = createWebSocketHandlers(roomManager);
 
     const server = Bun.serve<WsData>({
       port: 0,
-      fetch(req, srv) {
-        const upgradeResp = handleUpgrade(req, srv, db, roomManager);
+      async fetch(req, srv) {
+        const upgradeResp = await handleUpgrade(req, srv, store, roomManager);
         if (upgradeResp) return upgradeResp;
         const url = new URL(req.url);
         if (url.pathname.match(/^\/rooms\/[^/]+\/ws$/)) {
@@ -880,38 +882,39 @@ describe("RoomManager timeouts", () => {
 
       expect(await waitForMessage(hostWs)).toEqual({ type: "ended", reason: "expired" });
 
-      const room = db.prepare("SELECT status FROM rooms WHERE id = ?").get("ROOM01") as {
-        status: StoredRoom["status"];
-      };
-      expect(room.status).toBe("expired");
+      const room = await store.getRoom("ROOM01");
+      expect(room).not.toBeNull();
+      expect(room!.status).toBe("expired");
     } finally {
       roomManager.cleanupRoom("ROOM01");
       server.stop(true);
-      db.close();
     }
   });
 
   test("pre-join messages do not start idle expiry before activation", async () => {
-    const db = createTestDb();
-    createRoom(db, "WAIT10", "host-token-wait10", "Opening context", "r_wait10");
-    createInvite(
-      db,
+    const store = createTestStore();
+    await store.createRoom({
+      id: "WAIT10",
+      hostToken: "host-token-wait10",
+      openingMessage: "Opening context",
+      roomStem: "r_wait10",
+    });
+    await store.createInvite(
       "WAIT10",
       "r_wait10.1",
       new Date(Date.now() + 200).toISOString(),
     );
-    createInvite(
-      db,
+    await store.createInvite(
       "WAIT10",
       "r_wait10.2",
       new Date(Date.now() + 200).toISOString(),
     );
 
-    const roomManager = new RoomManager(db, { idleTimeoutMs: 50 });
+    const roomManager = new RoomManager(store, { idleTimeoutMs: 50 });
     const host = createFakeServerSocket();
 
-    roomManager.addConnection("WAIT10", "host", host.ws);
-    const accepted = roomManager.handleMessage("WAIT10", "host", {
+    await roomManager.addConnection("WAIT10", "host", host.ws);
+    const accepted = await roomManager.handleMessage("WAIT10", "host", {
       clientMessageId: "prejoin-1",
       replyToMessageId: null,
       content: "still waiting",
@@ -929,39 +932,40 @@ describe("RoomManager timeouts", () => {
     expect(host.sent).toHaveLength(1);
     expect(host.closed).toHaveLength(0);
 
-    const room = db.prepare("SELECT status FROM rooms WHERE id = ?").get("WAIT10") as {
-      status: StoredRoom["status"];
-    };
-    expect(room.status).toBe("waiting");
+    const room = await store.getRoom("WAIT10");
+    expect(room).not.toBeNull();
+    expect(room!.status).toBe("waiting");
 
     roomManager.cleanupRoom("WAIT10");
-    db.close();
   });
 
   test("claimed waiting rooms stay reusable after the only helper disconnects until invite expiry", async () => {
-    const db = createTestDb();
-    createRoom(db, "WAIT12", "host-token-wait12", "Opening context", "r_wait12");
-    createInvite(
-      db,
+    const store = createTestStore();
+    await store.createRoom({
+      id: "WAIT12",
+      hostToken: "host-token-wait12",
+      openingMessage: "Opening context",
+      roomStem: "r_wait12",
+    });
+    await store.createInvite(
       "WAIT12",
       "r_wait12.1",
       new Date(Date.now() + 5_000).toISOString(),
     );
-    createInvite(
-      db,
+    await store.createInvite(
       "WAIT12",
       "r_wait12.2",
       new Date(Date.now() + 5_000).toISOString(),
     );
-    const hostClaim = claimInvite(db, "r_wait12.1", "wait12-host-claim");
+    const hostClaim = await store.claimInvite("r_wait12.1", "wait12-host-claim");
 
-    const roomManager = new RoomManager(db, { idleTimeoutMs: 50 });
+    const roomManager = new RoomManager(store, { idleTimeoutMs: 50 });
     const wsHandlers = createWebSocketHandlers(roomManager);
 
     const server = Bun.serve<WsData>({
       port: 0,
-      fetch(req, srv) {
-        const upgradeResp = handleUpgrade(req, srv, db, roomManager);
+      async fetch(req, srv) {
+        const upgradeResp = await handleUpgrade(req, srv, store, roomManager);
         if (upgradeResp) return upgradeResp;
         const url = new URL(req.url);
         if (url.pathname.match(/^\/rooms\/[^/]+\/ws$/)) {
@@ -980,150 +984,135 @@ describe("RoomManager timeouts", () => {
       hostWs.close();
       await Bun.sleep(100);
 
-      const room = db.prepare(
-        "SELECT status, closed_at, host_connected_at FROM rooms WHERE id = ?",
-      ).get("WAIT12") as {
-        status: StoredRoom["status"];
-        closed_at: string | null;
-        host_connected_at: string | null;
-      };
-      expect(room.status).toBe("waiting");
-      expect(room.closed_at).toBeNull();
-      expect(room.host_connected_at).toBeNull();
+      const room = await store.getRoom("WAIT12");
+      expect(room).not.toBeNull();
+      expect(room!.status).toBe("waiting");
+      expect(room!.closed_at).toBeNull();
+      expect(room!.host_connected_at).toBeNull();
     } finally {
       roomManager.cleanupRoom("WAIT12");
       server.stop(true);
-      db.close();
     }
   });
 
-  test("expired waiting rooms do not activate even if both sockets connect", () => {
-    const db = createTestDb();
-    createRoom(db, "WAIT11", "host-token-wait11", "Opening context", "r_wait11");
-    db.prepare("UPDATE rooms SET guest_token = ? WHERE id = ?").run(
-      "guest-token-wait11",
-      "WAIT11",
-    );
-    createInvite(
-      db,
+  test("expired waiting rooms do not activate even if both sockets connect", async () => {
+    const store = createTestStore();
+    await store.createRoom({
+      id: "WAIT11",
+      hostToken: "host-token-wait11",
+      openingMessage: "Opening context",
+      roomStem: "r_wait11",
+    });
+    await store.createInvite(
       "WAIT11",
       "r_wait11.1",
-      new Date(Date.now() - 1_000).toISOString(),
+      new Date(Date.now() + 50).toISOString(),
     );
-    createInvite(
-      db,
+    await store.createInvite(
       "WAIT11",
       "r_wait11.2",
-      new Date(Date.now() - 1_000).toISOString(),
+      new Date(Date.now() + 50).toISOString(),
     );
+    const guestClaim = await store.claimInvite("r_wait11.2", "wait11-guest-claim");
+    await Bun.sleep(75);
 
-    const roomManager = new RoomManager(db);
+    const roomManager = new RoomManager(store);
     const host = createFakeServerSocket();
     const guest = createFakeServerSocket();
 
-    roomManager.addConnection("WAIT11", "host", host.ws);
-    roomManager.addConnection("WAIT11", "guest", guest.ws);
+    await roomManager.addConnection("WAIT11", "host", host.ws);
+    await roomManager.addConnection("WAIT11", "guest", guest.ws);
 
     expect(host.sent).toEqual([{ type: "ended", reason: "expired" }]);
     expect(guest.sent).toEqual([{ type: "ended", reason: "expired" }]);
     expect(host.closed).toEqual([{ code: 1000, reason: "Room expired" }]);
     expect(guest.closed).toEqual([{ code: 1000, reason: "Room expired" }]);
 
-    const room = db.prepare("SELECT status FROM rooms WHERE id = ?").get("WAIT11") as {
-      status: StoredRoom["status"];
-    };
-    expect(room.status).toBe("expired");
-
-    db.close();
+    const room = await store.getRoom("WAIT11");
+    expect(room).not.toBeNull();
+    expect(room!.status).toBe("expired");
+    expect(guestClaim.role).toBe("guest");
   });
 });
 
 describe("handleUpgrade — token validation", () => {
-  test("rejects when token does not match room ID", () => {
-    const db = createTestDb();
-    createRoom(db, "ROOM01", "host-token-123");
-    joinRoom(db, "ROOM01", "guest-token-456");
-    createRoom(db, "ROOM02", "other-host");
-    joinRoom(db, "ROOM02", "other-guest");
-    const roomManager = new RoomManager(db);
+  test("rejects when token does not match room ID", async () => {
+    const store = createTestStore();
+    await store.createRoom({ id: "ROOM01", hostToken: "host-token-123" });
+    await store.joinRoom("ROOM01", "guest-token-456");
+    await store.createRoom({ id: "ROOM02", hostToken: "other-host" });
+    await store.joinRoom("ROOM02", "other-guest");
+    const roomManager = new RoomManager(store);
 
     const mockServer = { upgrade: () => true } as any;
 
     const req = new Request("http://localhost/rooms/ROOM02/ws?token=host-token-123");
-    const result = handleUpgrade(req, mockServer, db, roomManager);
+    const result = await handleUpgrade(req, mockServer, store, roomManager);
     expect(result).toBeInstanceOf(Response);
     expect(result!.status).toBe(401);
-
-    db.close();
   });
 
-  test("rejects expired room", () => {
-    const db = createTestDb();
-    createRoom(db, "ROOM01", "host-token-123");
-    // Manually set status to expired
-    db.prepare("UPDATE rooms SET status = 'expired', closed_at = datetime('now') WHERE id = ?").run(
-      "ROOM01",
-    );
-    const roomManager = new RoomManager(db);
+  test("rejects expired room", async () => {
+    const store = createTestStore();
+    await store.createRoom({ id: "ROOM01", hostToken: "host-token-123" });
+    await store.expireRoom("ROOM01");
+    const roomManager = new RoomManager(store);
 
     const mockServer = { upgrade: () => true } as any;
     const req = new Request("http://localhost/rooms/ROOM01/ws?token=host-token-123");
-    const result = handleUpgrade(req, mockServer, db, roomManager);
+    const result = await handleUpgrade(req, mockServer, store, roomManager);
     expect(result).toBeInstanceOf(Response);
     expect(result!.status).toBe(410);
-
-    db.close();
   });
 
   test("rejects claimed waiting rooms after the original invite expiry has passed", async () => {
-    const db = createTestDb();
-    createRoom(db, "WAIT13", "host-token-wait13", "Opening context", "r_wait13");
-    createInvite(
-      db,
+    const store = createTestStore();
+    await store.createRoom({
+      id: "WAIT13",
+      hostToken: "host-token-wait13",
+      openingMessage: "Opening context",
+      roomStem: "r_wait13",
+    });
+    await store.createInvite(
       "WAIT13",
       "r_wait13.1",
       new Date(Date.now() + 50).toISOString(),
     );
-    createInvite(
-      db,
+    await store.createInvite(
       "WAIT13",
       "r_wait13.2",
       new Date(Date.now() + 50).toISOString(),
     );
-    const hostClaim = claimInvite(db, "r_wait13.1", "wait13-host-claim");
-    const roomManager = new RoomManager(db, { idleTimeoutMs: 5_000 });
+    const hostClaim = await store.claimInvite("r_wait13.1", "wait13-host-claim");
+    const roomManager = new RoomManager(store, { idleTimeoutMs: 5_000 });
 
     await Bun.sleep(75);
 
     const mockServer = { upgrade: () => true } as any;
     const req = new Request(`http://localhost/rooms/WAIT13/ws?token=${hostClaim.sessionToken}`);
-    const result = handleUpgrade(req, mockServer, db, roomManager);
+    const result = await handleUpgrade(req, mockServer, store, roomManager);
     expect(result).toBeInstanceOf(Response);
     expect(result!.status).toBe(410);
 
-    const room = db.prepare("SELECT status FROM rooms WHERE id = ?").get("WAIT13") as {
-      status: StoredRoom["status"];
-    };
-    expect(room.status).toBe("expired");
-
-    db.close();
+    const room = await store.getRoom("WAIT13");
+    expect(room).not.toBeNull();
+    expect(room!.status).toBe("expired");
   });
 
   test("rejects duplicate-role attach with a deterministic 409 response", async () => {
-    const db = createTestDb();
-    createRoom(db, "ROOM03", "host-token-duplicate");
-    const roomManager = new RoomManager(db);
+    const store = createTestStore();
+    await store.createRoom({ id: "ROOM03", hostToken: "host-token-duplicate" });
+    const roomManager = new RoomManager(store);
     const host = createFakeServerSocket();
-    roomManager.addConnection("ROOM03", "host", host.ws);
+    await roomManager.addConnection("ROOM03", "host", host.ws);
 
     const mockServer = { upgrade: () => true } as any;
     const req = new Request("http://localhost/rooms/ROOM03/ws?token=host-token-duplicate");
-    const result = handleUpgrade(req, mockServer, db, roomManager);
+    const result = await handleUpgrade(req, mockServer, store, roomManager);
     expect(result).toBeInstanceOf(Response);
     expect(result!.status).toBe(409);
     expect(await result!.text()).toContain("Role already connected");
 
     roomManager.cleanupRoom("ROOM03");
-    db.close();
   });
 });

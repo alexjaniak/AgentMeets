@@ -1,15 +1,7 @@
 import { Hono } from "hono";
 import { customAlphabet } from "nanoid";
-import type { Database } from "bun:sqlite";
-import {
-  createRoom,
-  expireRoom,
-  getRoom,
-  joinRoom,
-  issueInvite,
-  generateRoomId,
-  generateToken,
-} from "../db/index.js";
+import type { AgentMeetsStore } from "../db/store.js";
+import { generateRoomId, generateToken } from "../db/tokens.js";
 import { rateLimiter } from "../middleware/rate-limit.js";
 
 const ROOM_ID_PATTERN = /^[A-Z0-9]{6}$/;
@@ -18,21 +10,8 @@ const PUBLIC_BASE_URL =
   process.env.PUBLIC_URL?.replace(/\/$/, "") ?? "https://api.innies.live";
 const DEFAULT_INVITE_TTL_MS = 10 * 60 * 1000;
 
-export function roomRoutes(db: Database): Hono {
+export function roomRoutes(store: AgentMeetsStore): Hono {
   const router = new Hono();
-  const createRoomWithInvites = db.transaction(
-    (
-      roomId: string,
-      roomStem: string,
-      hostToken: string,
-      openingMessage: string,
-      inviteExpiresAt: string,
-    ) => {
-      createRoom(db, roomId, hostToken, openingMessage, roomStem);
-      issueInvite(db, roomId, `${roomStem}.1`, inviteExpiresAt);
-      issueInvite(db, roomId, `${roomStem}.2`, inviteExpiresAt);
-    },
-  );
 
   router.post("/rooms", async (c) => {
     let body: { openingMessage?: unknown; inviteTtlSeconds?: unknown };
@@ -71,13 +50,13 @@ export function roomRoutes(db: Database): Hono {
       const roomStem = generateRoomStem();
       const hostToken = generateToken();
       try {
-        createRoomWithInvites(
+        await store.createRoomWithInvites({
           roomId,
           roomStem,
           hostToken,
           openingMessage,
           inviteExpiresAt,
-        );
+        });
         return c.json(
           {
             roomId,
@@ -90,8 +69,7 @@ export function roomRoutes(db: Database): Hono {
           201,
         );
       } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        if (msg.includes("UNIQUE constraint failed") || msg.includes("PRIMARY KEY")) {
+        if (isRoomCollisionError(e)) {
           lastError = e;
           continue;
         }
@@ -110,7 +88,7 @@ export function roomRoutes(db: Database): Hono {
       return c.json({ error: "invalid_room_id" }, 400);
     }
 
-    const room = getRoom(db, id);
+    const room = await store.getRoom(id);
     if (!room) {
       return c.json({ error: "room_not_found" }, 404);
     }
@@ -120,13 +98,27 @@ export function roomRoutes(db: Database): Hono {
     if (room.guest_token !== null) {
       return c.json({ error: "room_full" }, 409);
     }
-    if (hasInviteExpired(db, id)) {
-      expireRoom(db, id);
+    if (await hasInviteExpired(store, room.id, room.room_stem)) {
+      await store.expireRoom(id);
       return c.json({ error: "room_expired" }, 410);
     }
 
     const guestToken = generateToken();
-    joinRoom(db, id, guestToken);
+    try {
+      await store.joinRoom(id, guestToken);
+    } catch (error) {
+      const joinError = error instanceof Error ? error.message : String(error);
+      if (joinError === "Room not found") {
+        return c.json({ error: "room_not_found" }, 404);
+      }
+      if (joinError === "Room is full" || joinError === "Room join conflict") {
+        return c.json({ error: "room_full" }, 409);
+      }
+      if (joinError === "Room is expired" || joinError === "Room is closed") {
+        return c.json({ error: "room_expired" }, 410);
+      }
+      throw error;
+    }
     return c.json({ guestToken }, 200);
   });
 
@@ -140,18 +132,28 @@ function generateRoomStem(): string {
   return generateStemId();
 }
 
-function hasInviteExpired(db: Database, roomId: string): boolean {
-  const row = db
-    .prepare(
-      `SELECT MIN(expires_at) AS expires_at
-       FROM invites
-       WHERE room_id = ?`,
-    )
-    .get(roomId) as { expires_at: string | null } | null;
-
-  if (!row?.expires_at) {
+async function hasInviteExpired(
+  store: AgentMeetsStore,
+  roomId: string,
+  roomStem: string | null,
+): Promise<boolean> {
+  if (!roomStem) {
     return false;
   }
 
-  return new Date(row.expires_at).getTime() <= Date.now();
+  const snapshot = await store.getPublicRoomSnapshot(roomStem);
+  if (!snapshot || snapshot.roomId !== roomId || !snapshot.inviteExpiresAt) {
+    return false;
+  }
+
+  return new Date(snapshot.inviteExpiresAt).getTime() <= Date.now();
+}
+
+function isRoomCollisionError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  return msg.includes("UNIQUE constraint failed")
+    || msg.includes("PRIMARY KEY")
+    || msg.includes("duplicate room id")
+    || msg.includes("duplicate room stem")
+    || msg.includes("duplicate key value violates unique constraint");
 }

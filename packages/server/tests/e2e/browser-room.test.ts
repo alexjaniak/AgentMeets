@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { Database } from "bun:sqlite";
 import { Hono } from "hono";
-import type { ServerMessage, StoredRoom } from "@agentmeets/shared";
-import { initializeSchema } from "../../src/db/schema.js";
+import type { ServerMessage } from "@agentmeets/shared";
+import {
+  createFakeAgentMeetsStore,
+  type AgentMeetsStore,
+} from "../../src/db/index.js";
 import { RoomManager } from "../../src/ws/room-manager.js";
 import { createWebSocketHandlers } from "../../src/ws/handler.js";
 import { handleUpgrade } from "../../src/ws/upgrade.js";
@@ -11,7 +13,7 @@ import { inviteRoutes } from "../../src/routes/invites.js";
 import { publicRoomRoutes } from "../../src/routes/public-rooms.js";
 import { roomRoutes } from "../../src/routes/rooms.js";
 
-let db: Database;
+let store: AgentMeetsStore;
 let app: Hono;
 let server: ReturnType<typeof Bun.serve>;
 let roomManager: RoomManager;
@@ -19,9 +21,9 @@ let port: number;
 
 async function buildApp(): Promise<Hono> {
   const nextApp = new Hono();
-  nextApp.route("/", roomRoutes(db));
-  nextApp.route("/", inviteRoutes(db));
-  nextApp.route("/", publicRoomRoutes(db));
+  nextApp.route("/", roomRoutes(store));
+  nextApp.route("/", inviteRoutes(store));
+  nextApp.route("/", publicRoomRoutes(store));
   return nextApp;
 }
 
@@ -88,15 +90,14 @@ function waitForMessages(ws: WebSocket, count: number): Promise<ServerMessage[]>
 }
 
 beforeEach(async () => {
-  db = new Database(":memory:");
-  initializeSchema(db);
+  store = createFakeAgentMeetsStore();
   app = await buildApp();
-  roomManager = new RoomManager(db, { idleTimeoutMs: 50 });
+  roomManager = new RoomManager(store, { idleTimeoutMs: 50 });
   const wsHandlers = createWebSocketHandlers(roomManager);
   server = Bun.serve<WsData>({
     port: 0,
-    fetch(req, srv) {
-      const upgradeResponse = handleUpgrade(req, srv, db, roomManager);
+    async fetch(req, srv) {
+      const upgradeResponse = await handleUpgrade(req, srv, store, roomManager);
       if (upgradeResponse) {
         return upgradeResponse;
       }
@@ -116,7 +117,6 @@ beforeEach(async () => {
 afterEach(() => {
   roomManager.shutdown();
   server.stop(true);
-  db.close();
 });
 
 describe("browser room presentation", () => {
@@ -319,12 +319,11 @@ describe("browser room presentation", () => {
     expect(manifest.status).toBe(410);
     expect(await manifest.json()).toEqual({ error: "invite_expired" });
 
-    const room = db
-      .prepare("SELECT status, closed_at, close_reason FROM rooms WHERE id = ?")
-      .get(created.roomId) as Pick<StoredRoom, "status" | "closed_at" | "close_reason">;
-    expect(room.status).toBe("expired");
-    expect(room.closed_at).toEqual(expect.any(String));
-    expect(room.close_reason).toBeNull();
+    const room = await store.getRoom(created.roomId);
+    expect(room).not.toBeNull();
+    expect(room!.status).toBe("expired");
+    expect(room!.closed_at).toEqual(expect.any(String));
+    expect(room!.close_reason).toBeNull();
   });
 
   test("legacy join path rejects rooms after the invite lifetime elapses", async () => {
@@ -350,11 +349,10 @@ describe("browser room presentation", () => {
     expect(joinResponse.status).toBe(410);
     expect(await joinResponse.json()).toEqual({ error: "room_expired" });
 
-    const room = db
-      .prepare("SELECT status, closed_at FROM rooms WHERE id = ?")
-      .get(created.roomId) as Pick<StoredRoom, "status" | "closed_at">;
-    expect(room.status).toBe("expired");
-    expect(room.closed_at).toEqual(expect.any(String));
+    const room = await store.getRoom(created.roomId);
+    expect(room).not.toBeNull();
+    expect(room!.status).toBe("expired");
+    expect(room!.closed_at).toEqual(expect.any(String));
   });
 
   test("legacy join path does not expire an already-claimed room after invite expiry", async () => {
@@ -390,11 +388,10 @@ describe("browser room presentation", () => {
     expect(joinResponse.status).toBe(409);
     expect(await joinResponse.json()).toEqual({ error: "room_full" });
 
-    const room = db
-      .prepare("SELECT status, guest_token FROM rooms WHERE id = ?")
-      .get(created.roomId) as Pick<StoredRoom, "status" | "guest_token">;
-    expect(room.status).toBe("waiting");
-    expect(room.guest_token).toEqual(expect.any(String));
+    const room = await store.getRoom(created.roomId);
+    expect(room).not.toBeNull();
+    expect(room!.status).toBe("waiting");
+    expect(room!.guest_token).toEqual(expect.any(String));
   });
 
   test("claimed invite sessions cannot activate after the original invite TTL elapses", async () => {
@@ -477,11 +474,10 @@ describe("browser room presentation", () => {
     expect(hostClose.code).not.toBe(1000);
     expect(guestClose.code).not.toBe(1000);
 
-    const room = db
-      .prepare("SELECT status, closed_at FROM rooms WHERE id = ?")
-      .get(created.roomId) as Pick<StoredRoom, "status" | "closed_at">;
-    expect(room.status).toBe("expired");
-    expect(room.closed_at).toEqual(expect.any(String));
+    const room = await store.getRoom(created.roomId);
+    expect(room).not.toBeNull();
+    expect(room!.status).toBe("expired");
+    expect(room!.closed_at).toEqual(expect.any(String));
   });
 
   test("claimed rooms fall back to waiting after a disconnect until the invite expires", async () => {
@@ -533,12 +529,11 @@ describe("browser room presentation", () => {
       status: "waiting_for_both",
     });
 
-    const room = db
-      .prepare("SELECT status, closed_at, host_connected_at FROM rooms WHERE id = ?")
-      .get(created.roomId) as Pick<StoredRoom, "status" | "closed_at" | "host_connected_at">;
-    expect(room.status).toBe("waiting");
-    expect(room.closed_at).toBeNull();
-    expect(room.host_connected_at).toBeNull();
+    const room = await store.getRoom(created.roomId);
+    expect(room).not.toBeNull();
+    expect(room!.status).toBe("waiting");
+    expect(room!.closed_at).toBeNull();
+    expect(room!.host_connected_at).toBeNull();
   });
 
   test("invite links render a thin informational landing for html browsers", async () => {

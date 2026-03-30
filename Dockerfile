@@ -17,7 +17,5 @@ COPY packages/server/ ./packages/server/
 COPY package.json ./
 
 EXPOSE 3000
-ENV DATABASE_PATH=/data/agentmeets.db
-VOLUME ["/data"]
 
 CMD ["bun", "run", "packages/server/src/index.ts"]

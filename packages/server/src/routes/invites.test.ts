@@ -1,25 +1,26 @@
 import { describe, test, expect, beforeEach } from "bun:test";
 import { Hono } from "hono";
-import { Database } from "bun:sqlite";
-import { initializeSchema } from "../db/schema.js";
-import { createRoom } from "../db/rooms.js";
-import { createInvite } from "../db/invites.js";
+import { createFakeAgentMeetsStore, type AgentMeetsStore } from "../db/index.js";
 import { inviteRoutes } from "./invites.js";
 
-let db: Database;
+let store: AgentMeetsStore;
 let app: Hono;
 
 beforeEach(() => {
-  db = new Database(":memory:");
-  initializeSchema(db);
+  store = createFakeAgentMeetsStore();
   app = new Hono();
-  app.route("/", inviteRoutes(db));
+  app.route("/", inviteRoutes(store));
 });
 
 describe("GET /j/:inviteToken", () => {
   test("returns manifest with room stem and invite role", async () => {
-    createRoom(db, "ABC123", "host-token", "Opening hello", "r_9wK3mQvH8");
-    createInvite(db, "ABC123", "r_9wK3mQvH8.1", "2099-03-24 12:05:00");
+    await store.createRoom({
+      id: "ABC123",
+      hostToken: "host-token",
+      openingMessage: "Opening hello",
+      roomStem: "r_9wK3mQvH8",
+    });
+    await store.createInvite("ABC123", "r_9wK3mQvH8.1", "2099-03-24 12:05:00");
 
     const res = await app.request("/j/r_9wK3mQvH8.1");
     expect(res.status).toBe(200);
@@ -34,8 +35,13 @@ describe("GET /j/:inviteToken", () => {
   });
 
   test("returns a thin informational landing for browsers requesting html", async () => {
-    createRoom(db, "ABC123", "host-token", "Opening hello", "r_9wK3mQvH8");
-    createInvite(db, "ABC123", "r_9wK3mQvH8.1", "2099-03-24 12:05:00");
+    await store.createRoom({
+      id: "ABC123",
+      hostToken: "host-token",
+      openingMessage: "Opening hello",
+      roomStem: "r_9wK3mQvH8",
+    });
+    await store.createInvite("ABC123", "r_9wK3mQvH8.1", "2099-03-24 12:05:00");
 
     const res = await app.request("/j/r_9wK3mQvH8.1", {
       headers: { accept: "text/html" },
@@ -54,8 +60,13 @@ describe("GET /j/:inviteToken", () => {
 
 describe("POST /invites/:inviteToken/claim", () => {
   test("requires Idempotency-Key", async () => {
-    createRoom(db, "ABC123", "host-token", "Opening hello", "r_9wK3mQvH8");
-    createInvite(db, "ABC123", "r_9wK3mQvH8.2", "2099-03-24 12:05:00");
+    await store.createRoom({
+      id: "ABC123",
+      hostToken: "host-token",
+      openingMessage: "Opening hello",
+      roomStem: "r_9wK3mQvH8",
+    });
+    await store.createInvite("ABC123", "r_9wK3mQvH8.2", "2099-03-24 12:05:00");
 
     const res = await app.request("/invites/r_9wK3mQvH8.2/claim", {
       method: "POST",
@@ -65,8 +76,13 @@ describe("POST /invites/:inviteToken/claim", () => {
   });
 
   test("returns waiting_for_both for a guest claim and is idempotent for the same key", async () => {
-    createRoom(db, "ABC123", "host-token", "Opening hello", "r_9wK3mQvH8");
-    createInvite(db, "ABC123", "r_9wK3mQvH8.2", "2099-03-24 12:05:00");
+    await store.createRoom({
+      id: "ABC123",
+      hostToken: "host-token",
+      openingMessage: "Opening hello",
+      roomStem: "r_9wK3mQvH8",
+    });
+    await store.createInvite("ABC123", "r_9wK3mQvH8.2", "2099-03-24 12:05:00");
 
     const first = await app.request("/invites/r_9wK3mQvH8.2/claim", {
       method: "POST",
@@ -90,8 +106,13 @@ describe("POST /invites/:inviteToken/claim", () => {
   });
 
   test("conflicts when a different idempotency key claims an already-claimed invite", async () => {
-    createRoom(db, "ABC123", "host-token", "Opening hello", "r_9wK3mQvH8");
-    createInvite(db, "ABC123", "r_9wK3mQvH8.2", "2099-03-24 12:05:00");
+    await store.createRoom({
+      id: "ABC123",
+      hostToken: "host-token",
+      openingMessage: "Opening hello",
+      roomStem: "r_9wK3mQvH8",
+    });
+    await store.createInvite("ABC123", "r_9wK3mQvH8.2", "2099-03-24 12:05:00");
 
     await app.request("/invites/r_9wK3mQvH8.2/claim", {
       method: "POST",
