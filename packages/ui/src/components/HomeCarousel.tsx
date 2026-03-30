@@ -224,23 +224,13 @@ export function HomeCarousel() {
     <>
       <div className={styles.workspaceMeta}>
         {room ? (
-          <>
-            <span className={styles.workspaceLabel}>
-              ROOM WORKSPACE
-            </span>
-            <span className={styles.workspaceHint}>
-              {`ROOM: ${room.roomStem} \u00b7 STATUS: ${room.status.replaceAll('_', ' ').toUpperCase()} \u00b7 EXPIRES: ${countdown}`}
-            </span>
-          </>
+          <span className={styles.workspaceHint}>
+            {`ROOM: ${room.roomStem} \u00b7 STATUS: ${room.status.replaceAll('_', ' ').toUpperCase()} \u00b7 EXPIRES: ${countdown}`}
+          </span>
         ) : (
-          <>
-            <span className={styles.workspaceLabel}>
-              CREATE ROOM
-            </span>
-            <span className={styles.workspaceHint}>
-              TYPE AN OPENING MESSAGE TO CREATE ROOM
-            </span>
-          </>
+          <span className={styles.workspaceHint}>
+            TYPE AN OPENING MESSAGE TO CREATE ROOM
+          </span>
         )}
 
         {showCarouselControls ? (
@@ -275,7 +265,7 @@ export function HomeCarousel() {
           <div
             className={styles.carouselTrack}
             style={{
-              '--page-columns': String(pageSize),
+              '--page-columns': String(Math.min(pageSize, panes.length)),
               transform: `translateX(-${activePage * 100}%)`,
             } as CSSProperties}
           >

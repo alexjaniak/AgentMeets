@@ -296,9 +296,9 @@
 }
 
 .workspaceMeta {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  display: flex;
   align-items: center;
+  justify-content: center;
   gap: 12px;
   color: var(--console-ink-soft);
   font-size: 11px;
@@ -399,6 +399,9 @@
   gap: var(--pane-gap);
   min-width: 0;
   min-height: 0;
+  justify-content: center;
+  max-width: 1080px;
+  margin: 0 auto;
 }
 
 /* ── Form pane wrapper (pre-creation, centered single pane) */
