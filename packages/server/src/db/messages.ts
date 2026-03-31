@@ -41,22 +41,6 @@ export function getPendingMessages(
   return stmt.all(roomId) as Message[];
 }
 
-export function getReplayMessages(
-  db: Database,
-  roomId: string,
-  role: Sender,
-): Message[] {
-  const messages = getMessages(db, roomId);
-  if (role === "guest") {
-    return messages.filter((message) => message.sender === "host");
-  }
-
-  const openingMessage = getOpeningMessage(db, roomId);
-  return messages.filter(
-    (message) => message.sender === "guest" || message.id === openingMessage?.id,
-  );
-}
-
 export function getOpeningMessage(
   db: Database,
   roomId: string,

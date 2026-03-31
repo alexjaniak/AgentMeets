@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Database } from "bun:sqlite";
-import { derivePublicRoomStatus, type RoomStatus, type Sender } from "@agentmeets/shared";
+import type { RoomStatus, Sender } from "@agentmeets/shared";
 import { expireRoom, touchRoomActivity } from "./rooms.js";
 
 const DEFAULT_INVITE_TTL_MS = 5 * 60 * 1000;
@@ -11,8 +11,6 @@ interface InviteLookupRow {
   room_status: string;
   host_token: string;
   guest_token: string | null;
-  host_connected_at: string | null;
-  guest_connected_at: string | null;
   joined_at: string | null;
   participant_role: Sender;
   opening_message: string | null;
@@ -35,7 +33,7 @@ export interface InviteClaimResult {
   role: Sender;
   sessionToken: string;
   guestToken?: string;
-  status: RoomStatus;
+  status: "activating";
 }
 
 export class InviteError extends Error {
@@ -121,7 +119,7 @@ export function claimInvite(
           role: record.participant_role,
           sessionToken,
           ...(record.participant_role === "guest" ? { guestToken: sessionToken } : {}),
-          status: deriveInviteStatus(record),
+          status: "activating" as const,
         };
       }
 
@@ -177,10 +175,7 @@ export function claimInvite(
       role: record.participant_role,
       sessionToken,
       ...(record.participant_role === "guest" ? { guestToken: sessionToken } : {}),
-      status: deriveInviteStatus({
-        ...record,
-        guest_token: record.participant_role === "guest" ? sessionToken : record.guest_token,
-      }),
+      status: "activating" as const,
     };
   })();
 }
@@ -197,8 +192,6 @@ function getInviteLookup(
          r.status AS room_status,
          r.host_token,
          r.guest_token,
-         r.host_connected_at,
-         r.guest_connected_at,
          r.joined_at,
          i.participant_role,
          COALESCE(
@@ -228,9 +221,6 @@ function getInviteLookup(
 }
 
 function ensureInviteUsable(db: Database, record: InviteLookupRow): void {
-  if (record.room_status === "active") {
-    return;
-  }
   if (record.room_status === "closed") {
     throw new InviteError("Room has ended", 410, "invite_expired");
   }
@@ -238,7 +228,7 @@ function ensureInviteUsable(db: Database, record: InviteLookupRow): void {
     throw new InviteError("Invite has expired", 410, "invite_expired");
   }
   if (new Date(record.expires_at).getTime() <= Date.now()) {
-    if (record.room_status === "waiting") {
+    if (record.room_status === "waiting" && record.guest_token === null) {
       expireRoom(db, record.room_id);
     }
     throw new InviteError("Invite has expired", 410, "invite_expired");
@@ -246,11 +236,19 @@ function ensureInviteUsable(db: Database, record: InviteLookupRow): void {
 }
 
 function deriveInviteStatus(record: InviteLookupRow): RoomStatus {
-  return derivePublicRoomStatus({
-    roomStatus: record.room_status as "waiting" | "active" | "closed" | "expired",
-    hostConnectedAt: record.host_connected_at,
-    guestConnectedAt: record.guest_connected_at,
-  });
+  if (record.room_status === "active") {
+    return "active";
+  }
+  if (record.room_status === "closed") {
+    return "ended";
+  }
+  if (record.room_status === "expired") {
+    return "expired";
+  }
+  if (record.guest_token !== null || record.claimed_at !== null) {
+    return "activating";
+  }
+  return "waiting_for_join";
 }
 
 function hashInviteToken(token: string): string {

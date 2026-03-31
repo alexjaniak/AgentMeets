@@ -10,8 +10,6 @@ export {
   closeRoom,
   expireRoom,
   getRoomByToken,
-  markRoleConnected,
-  clearRoleConnected,
   touchRoomActivity,
 } from "./rooms.js";
 export { saveMessage, getMessages, getPendingMessages } from "./messages.js";

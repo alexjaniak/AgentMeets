@@ -17,12 +17,9 @@ function createTestDb(): Database {
 
 const _publicRoomContractCheck = {
   id: "ROOM01",
-  room_stem: null,
   host_token: "host-token-123",
   guest_token: null,
-  status: "waiting_for_both",
-  host_connected_at: null,
-  guest_connected_at: null,
+  status: "waiting_for_join",
   created_at: "2026-03-24 00:00:00",
   joined_at: null,
   closed_at: null,
@@ -34,13 +31,9 @@ function setupRoom(db: Database): StoredRoom {
   return joinRoom(db, "ROOM01", "guest-token-456");
 }
 
-function roomActive(roomId: string) {
-  return { type: "room_active", roomId } as const;
-}
-
-function waitForMessage(ws: WebSocket, timeoutMs = 5000): Promise<ServerMessage> {
+function waitForMessage(ws: WebSocket): Promise<ServerMessage> {
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error("Timeout waiting for message")), timeoutMs);
+    const timeout = setTimeout(() => reject(new Error("Timeout waiting for message")), 5000);
     ws.addEventListener(
       "message",
       (event) => {
@@ -210,26 +203,30 @@ describe("WebSocket relay — integration tests", () => {
     await waitForOpen(guestWs);
 
     const hostActivation = await hostActivationPromise;
-    expect(hostActivation).toEqual(roomActive("ROOM01"));
+    expect(hostActivation).toEqual({ type: "room_active" });
 
     const guestActivation = await waitForMessage(guestWs);
-    expect(guestActivation).toEqual(roomActive("ROOM01"));
+    expect(guestActivation).toEqual({ type: "room_active" });
 
     hostWs.close();
     guestWs.close();
   });
 
-  test("guest receives the persisted opening message immediately before activation", async () => {
+  test("guest receives the persisted opening message replay after activation", async () => {
     const roomId = "ROOM02";
     createRoom(db, roomId, "host-token-789", "Welcome to the relay.");
-    db.prepare("UPDATE rooms SET guest_token = ? WHERE id = ?").run(
-      "guest-token-987",
-      roomId,
-    );
+    joinRoom(db, roomId, "guest-token-987");
+
+    const hostWs = connectAs("host-token-789", roomId);
+    await waitForOpen(hostWs);
+
     const guestWs = connectAs("guest-token-987", roomId);
     await waitForOpen(guestWs);
 
-    const replay = (await waitForMessage(guestWs, 250)) as Record<string, unknown>;
+    expect(await waitForMessage(hostWs)).toEqual({ type: "room_active" });
+    expect(await waitForMessage(guestWs)).toEqual({ type: "room_active" });
+
+    const replay = (await waitForMessage(guestWs)) as Record<string, unknown>;
     expect(replay).toMatchObject({
       type: "message",
       sender: "host",
@@ -239,9 +236,9 @@ describe("WebSocket relay — integration tests", () => {
     expect(replay.clientMessageId).toBe(`persisted:${replay.messageId}`);
     expect(typeof replay.messageId).toBe("number");
     expect(typeof replay.createdAt).toBe("string");
-    await expectNoMessage(guestWs);
 
     roomManager.cleanupRoom(roomId);
+    hostWs.close();
     guestWs.close();
   });
 
@@ -255,12 +252,6 @@ describe("WebSocket relay — integration tests", () => {
 
     const hostWs = connectAs("host-token-790", roomId);
     await waitForOpen(hostWs);
-
-    expect(await waitForMessage(hostWs)).toMatchObject({
-      type: "message",
-      sender: "host",
-      content: "Opening context.",
-    });
 
     const hostAckPromise = waitForMessage(hostWs);
     hostWs.send(
@@ -277,33 +268,31 @@ describe("WebSocket relay — integration tests", () => {
       clientMessageId: "prejoin-host-1",
     });
 
-    const hostActivationPromise = waitForMessage(hostWs);
     const guestWs = connectAs("guest-token-988", roomId);
-    const guestMessagesPromise = waitForMessages(guestWs, 3);
     await waitForOpen(guestWs);
 
-    const guestMessages = await guestMessagesPromise;
-    expect(guestMessages[0]).toMatchObject({
+    expect(await waitForMessage(hostWs)).toEqual({ type: "room_active" });
+    expect(await waitForMessage(guestWs)).toEqual({ type: "room_active" });
+
+    expect(await waitForMessage(guestWs)).toMatchObject({
       type: "message",
       sender: "host",
       content: "Opening context.",
     });
-    expect(guestMessages[1]).toMatchObject({
+    expect(await waitForMessage(guestWs)).toMatchObject({
       type: "message",
       sender: "host",
       content: "Additional context before you join.",
     });
-    expect(guestMessages[2]).toEqual(roomActive(roomId));
-    expect(await hostActivationPromise).toEqual(roomActive(roomId));
 
     roomManager.cleanupRoom(roomId);
     hostWs.close();
     guestWs.close();
   });
 
-  test("host replays the opening message first when guest drafts before host attach", async () => {
+  test("host receives guest messages that were accepted before activation when guest connects first", async () => {
     const roomId = "ROOM04";
-    createRoom(db, roomId, "host-token-791", "Opening message from the room creator.");
+    createRoom(db, roomId, "host-token-791", "Opening context.");
     db.prepare("UPDATE rooms SET guest_token = ? WHERE id = ?").run(
       "guest-token-989",
       roomId,
@@ -312,20 +301,13 @@ describe("WebSocket relay — integration tests", () => {
     const guestWs = connectAs("guest-token-989", roomId);
     await waitForOpen(guestWs);
 
-    const openingReplay = (await waitForMessage(guestWs, 250)) as Record<string, unknown>;
-    expect(openingReplay).toMatchObject({
-      type: "message",
-      sender: "host",
-      content: "Opening message from the room creator.",
-    });
-
     const guestAckPromise = waitForMessage(guestWs);
     guestWs.send(
       JSON.stringify({
         type: "message",
         clientMessageId: "prejoin-guest-1",
-        replyToMessageId: openingReplay.messageId as number,
-        content: "Guest reply drafted before host attach.",
+        replyToMessageId: null,
+        content: "Guest context before the host arrives.",
       }),
     );
 
@@ -334,27 +316,27 @@ describe("WebSocket relay — integration tests", () => {
       clientMessageId: "prejoin-guest-1",
     });
 
-    await expectNoMessage(guestWs);
-
-    const guestActivationPromise = waitForMessage(guestWs);
+    const guestMessagesPromise = waitForMessages(guestWs, 2);
     const hostWs = connectAs("host-token-791", roomId);
-    const hostMessagesPromise = waitForMessages(hostWs, 3);
+    const hostMessagesPromise = waitForMessages(hostWs, 2);
     await waitForOpen(hostWs);
 
-    const [hostMessages, guestActivation] = await Promise.all([
+    const [hostMessages, guestMessages] = await Promise.all([
       hostMessagesPromise,
-      guestActivationPromise,
+      guestMessagesPromise,
     ]);
-    expect(hostMessages[0]).toEqual(roomActive(roomId));
-    expect(guestActivation).toEqual(roomActive(roomId));
-
-    const replayedToHost = hostMessages
-      .slice(1)
-      .map((message) => (message as Record<string, unknown>).content);
-    expect(replayedToHost).toEqual([
-      "Opening message from the room creator.",
-      "Guest reply drafted before host attach.",
-    ]);
+    expect(hostMessages[0]).toEqual({ type: "room_active" });
+    expect(hostMessages[1]).toMatchObject({
+      type: "message",
+      sender: "guest",
+      content: "Guest context before the host arrives.",
+    });
+    expect(guestMessages[0]).toEqual({ type: "room_active" });
+    expect(guestMessages[1]).toMatchObject({
+      type: "message",
+      sender: "host",
+      content: "Opening context.",
+    });
 
     roomManager.cleanupRoom(roomId);
     hostWs.close();
@@ -560,11 +542,6 @@ describe("WebSocket relay — integration tests", () => {
         `ws://localhost:${server.port}/rooms/WAIT01/ws?token=host-token-waiting`,
       );
       await waitForOpen(hostWs);
-      expect(await waitForMessage(hostWs)).toMatchObject({
-        type: "message",
-        sender: "host",
-        content: "Opening context",
-      });
       const ended = await waitForMessage(hostWs);
       expect(ended).toEqual({ type: "ended", reason: "expired" });
       const close = await waitForClose(hostWs);
@@ -926,18 +903,13 @@ describe("RoomManager timeouts", () => {
 
     expect(accepted).toBe(true);
     expect(host.sent[0]).toMatchObject({
-      type: "message",
-      sender: "host",
-      content: "Opening context",
-    });
-    expect(host.sent[1]).toMatchObject({
       type: "ack",
       clientMessageId: "prejoin-1",
     });
 
     await Bun.sleep(100);
 
-    expect(host.sent).toHaveLength(2);
+    expect(host.sent).toHaveLength(1);
     expect(host.closed).toHaveLength(0);
 
     const room = db.prepare("SELECT status FROM rooms WHERE id = ?").get("WAIT10") as {
@@ -949,7 +921,7 @@ describe("RoomManager timeouts", () => {
     db.close();
   });
 
-  test("claimed waiting rooms stay reusable after the only helper disconnects until invite expiry", async () => {
+  test("claimed waiting rooms still expire after the only helper disconnects", async () => {
     const db = createTestDb();
     createRoom(db, "WAIT12", "host-token-wait12", "Opening context", "r_wait12");
     createInvite(
@@ -991,16 +963,12 @@ describe("RoomManager timeouts", () => {
       hostWs.close();
       await Bun.sleep(100);
 
-      const room = db.prepare(
-        "SELECT status, closed_at, host_connected_at FROM rooms WHERE id = ?",
-      ).get("WAIT12") as {
+      const room = db.prepare("SELECT status, closed_at FROM rooms WHERE id = ?").get("WAIT12") as {
         status: StoredRoom["status"];
         closed_at: string | null;
-        host_connected_at: string | null;
       };
-      expect(room.status).toBe("waiting");
-      expect(room.closed_at).toBeNull();
-      expect(room.host_connected_at).toBeNull();
+      expect(room.status).toBe("expired");
+      expect(room.closed_at).toEqual(expect.any(String));
     } finally {
       roomManager.cleanupRoom("WAIT12");
       server.stop(true);
@@ -1083,58 +1051,6 @@ describe("handleUpgrade — token validation", () => {
     expect(result).toBeInstanceOf(Response);
     expect(result!.status).toBe(410);
 
-    db.close();
-  });
-
-  test("rejects claimed waiting rooms after the original invite expiry has passed", async () => {
-    const db = createTestDb();
-    createRoom(db, "WAIT13", "host-token-wait13", "Opening context", "r_wait13");
-    createInvite(
-      db,
-      "WAIT13",
-      "r_wait13.1",
-      new Date(Date.now() + 50).toISOString(),
-    );
-    createInvite(
-      db,
-      "WAIT13",
-      "r_wait13.2",
-      new Date(Date.now() + 50).toISOString(),
-    );
-    const hostClaim = claimInvite(db, "r_wait13.1", "wait13-host-claim");
-    const roomManager = new RoomManager(db, { idleTimeoutMs: 5_000 });
-
-    await Bun.sleep(75);
-
-    const mockServer = { upgrade: () => true } as any;
-    const req = new Request(`http://localhost/rooms/WAIT13/ws?token=${hostClaim.sessionToken}`);
-    const result = handleUpgrade(req, mockServer, db, roomManager);
-    expect(result).toBeInstanceOf(Response);
-    expect(result!.status).toBe(410);
-
-    const room = db.prepare("SELECT status FROM rooms WHERE id = ?").get("WAIT13") as {
-      status: StoredRoom["status"];
-    };
-    expect(room.status).toBe("expired");
-
-    db.close();
-  });
-
-  test("rejects duplicate-role attach with a deterministic 409 response", async () => {
-    const db = createTestDb();
-    createRoom(db, "ROOM03", "host-token-duplicate");
-    const roomManager = new RoomManager(db);
-    const host = createFakeServerSocket();
-    roomManager.addConnection("ROOM03", "host", host.ws);
-
-    const mockServer = { upgrade: () => true } as any;
-    const req = new Request("http://localhost/rooms/ROOM03/ws?token=host-token-duplicate");
-    const result = handleUpgrade(req, mockServer, db, roomManager);
-    expect(result).toBeInstanceOf(Response);
-    expect(result!.status).toBe(409);
-    expect(await result!.text()).toContain("Role already connected");
-
-    roomManager.cleanupRoom("ROOM03");
     db.close();
   });
 });
