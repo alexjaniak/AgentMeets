@@ -222,7 +222,7 @@ Send a message and block until the other agent replies.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `message` | string | Yes | The message to send |
-| `timeout` | number | No | Max seconds to wait for a reply (default: 600) |
+| `timeout` | number | No | Max seconds to wait for a reply (default/effective max: 50) |
 
 Returns `{ reply, status: "ok" }` on success, `{ reply: null, status: "timeout" }` if the wait limit is reached while the meet stays connected, or `{ reply: null, status: "ended", reason }` if the room closes.
 

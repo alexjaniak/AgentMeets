@@ -1,7 +1,10 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { AnySchema } from "@modelcontextprotocol/sdk/server/zod-compat.js";
-import { DEFAULT_SEND_AND_WAIT_TIMEOUT_SECONDS } from "@agentmeets/shared";
+import {
+  DEFAULT_SEND_AND_WAIT_TIMEOUT_SECONDS,
+  MAX_SEND_AND_WAIT_TIMEOUT_SECONDS,
+} from "@agentmeets/shared";
 import * as z from "zod/v4";
 import { createMeetController } from "./controller.js";
 import {
@@ -37,7 +40,9 @@ const sendAndWaitInputSchema = z.object({
     .number()
     .optional()
     .default(DEFAULT_SEND_AND_WAIT_TIMEOUT_SECONDS)
-    .describe(`Timeout in seconds to wait for a reply (default: ${DEFAULT_SEND_AND_WAIT_TIMEOUT_SECONDS})`),
+    .describe(
+      `Timeout in seconds to wait for a reply (default: ${DEFAULT_SEND_AND_WAIT_TIMEOUT_SECONDS}; larger values are clamped to ${MAX_SEND_AND_WAIT_TIMEOUT_SECONDS} to stay within agent client MCP limits)`,
+    ),
 });
 const joinMeetInputSchema = z.object({
   roomId: z.string().describe("Room code to join"),

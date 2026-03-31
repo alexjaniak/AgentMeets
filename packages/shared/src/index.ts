@@ -26,7 +26,9 @@ export type {
 } from "./protocol.js";
 
 export {
+  clampSendAndWaitTimeoutSeconds,
   DEFAULT_SEND_AND_WAIT_TIMEOUT_SECONDS,
   DEFAULT_SEND_AND_WAIT_TIMEOUT_MS,
+  MAX_SEND_AND_WAIT_TIMEOUT_SECONDS,
   DEFAULT_SESSION_HELPER_COUNTDOWN_MS,
 } from "./defaults.js";

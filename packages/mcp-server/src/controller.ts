@@ -1,4 +1,4 @@
-import { DEFAULT_SEND_AND_WAIT_TIMEOUT_SECONDS } from "@agentmeets/shared";
+import { clampSendAndWaitTimeoutSeconds } from "@agentmeets/shared";
 import { createEndPayload, createMeetState, createMessagePayload, processServerMessage } from "./client.js";
 import type { PendingReplyResult, MeetState } from "./client.js";
 import { createCreateMeetHandler } from "./tools/create-meet.js";
@@ -209,7 +209,7 @@ export function createMeetController({
     }
 
     const activeMeet = meetState;
-    const timeout = input.timeout ?? DEFAULT_SEND_AND_WAIT_TIMEOUT_SECONDS;
+    const timeout = clampSendAndWaitTimeoutSeconds(input.timeout);
 
     const result = await new Promise<PendingReplyResult>((resolve) => {
       const finish = (value: PendingReplyResult) => resolve(value);
