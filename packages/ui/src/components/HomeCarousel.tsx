@@ -2,6 +2,7 @@
 
 import { startTransition, useEffect, useRef, useState } from 'react';
 import { createRoom, type CreateRoomPayload } from '../lib/api';
+import { JoinInstructionsPane } from './JoinInstructionsPane';
 import styles from '../app/page.module.css';
 
 function formatCountdown(expiresAt: string): string {
@@ -10,42 +11,6 @@ function formatCountdown(expiresAt: string): string {
   const mins = Math.floor(diff / 60_000);
   const secs = Math.floor((diff % 60_000) / 1000);
   return `${mins}:${String(secs).padStart(2, '0')}`;
-}
-
-function LabeledCopyButton({ label, contents }: { label: string; contents: string }) {
-  const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    if (!copied) return undefined;
-    const timeoutId = globalThis.setTimeout(() => setCopied(false), 1400);
-    return () => globalThis.clearTimeout(timeoutId);
-  }, [copied]);
-
-  const handleClick = async () => {
-    try {
-      await navigator.clipboard.writeText(contents);
-      setCopied(true);
-    } catch {
-      setCopied(false);
-    }
-  };
-
-  return (
-    <button
-      className={[
-        styles.copyButtonLabeled,
-        copied ? styles.copyButtonLabeledCopied : '',
-      ].filter(Boolean).join(' ')}
-      onClick={() => { void handleClick(); }}
-      type="button"
-    >
-      <svg className={styles.copyButtonLabeledIcon} viewBox="0 0 16 16" aria-hidden="true">
-        <rect x="5.5" y="3.5" width="7" height="9" rx="1.4" />
-        <path d="M4.5 10.5h-1A1.5 1.5 0 0 1 2 9V4.5A1.5 1.5 0 0 1 3.5 3h4" />
-      </svg>
-      {copied ? 'COPIED' : label}
-    </button>
-  );
 }
 
 export function HomeCarousel() {
@@ -86,9 +51,6 @@ export function HomeCarousel() {
     }
   }
 
-  const hostCopyText = room ? `join ${room.hostAgentLink}` : '';
-  const guestCopyText = room ? `join ${room.guestAgentLink}` : '';
-
   return (
     <>
       <div className={styles.workspaceMeta}>
@@ -117,29 +79,7 @@ export function HomeCarousel() {
                 <div className={styles.paneChromeActions} />
               </div>
               <div className={styles.paneBody}>
-                <div className={styles.joinBody}>
-                  <div className={styles.joinSection}>
-                    <h3 className={styles.joinSectionHeading}>Setup (one-time)</h3>
-                    <p className={styles.joinText}>1. Run in your terminal:</p>
-                    <pre className={styles.joinCode}>claude mcp add innieslive -- npx innieslive@latest</pre>
-                    <p className={styles.joinText}>2. Restart your Claude Code or Codex session</p>
-                  </div>
-
-                  <div className={styles.joinSection}>
-                    <h3 className={styles.joinSectionHeading}>Opening Message</h3>
-                    <pre className={styles.openingMessagePreview}>{trimmedMessage}</pre>
-                  </div>
-
-                  <div className={styles.joinSection}>
-                    <p className={styles.joinHint}>
-                      Copy and send instructions to your agent and the other agent
-                    </p>
-                    <div className={styles.copyButtonRow}>
-                      <LabeledCopyButton label="YOUR AGENT (HOST)" contents={hostCopyText} />
-                      <LabeledCopyButton label="OTHER AGENT (GUEST)" contents={guestCopyText} />
-                    </div>
-                  </div>
-                </div>
+                <JoinInstructionsPane room={room} openingMessage={trimmedMessage} />
               </div>
             </article>
           </div>
