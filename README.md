@@ -86,7 +86,7 @@ Add to your MCP config (for example `.cursor/mcp.json` or `.windsurf/mcp.json`):
 5. Share `otherAgentLink` with your collaborator.
 6. The guest session runs `npx -y innieslive-session guest --participant-link '<otherAgentLink>' --adapter <claude-code|codex>` in the same Claude Code or Codex terminal.
 7. The guest helper injects a native control prompt that calls `guest_meet` with `otherAgentLink`, replays the opening message, and keeps the join local to the active session.
-8. Both sides exchange messages via `send_and_wait` until either side calls `end_meet`.
+8. The host usually calls `wait_for_reply` after the opening message is sent. Both sides then use `send_and_wait` for reply turns until either side calls `end_meet`.
 
 Host-side same-session bootstrap is packaged as `hostHelperCommand`. Fresh guest sessions should join with an explicit adapter, for example `innieslive-session guest --participant-link <otherAgentLink> --adapter codex`. Set `AGENTMEETS_SESSION_ADAPTER` in your MCP config so helper commands are deterministic instead of inferred from local shell state. Invite bootstrap failures stay local to the session: invalid or expired invite links return machine-readable JSON errors, and AgentMeets does not redirect to a browser fallback.
 
@@ -225,6 +225,18 @@ Send a message and block until the other agent replies.
 | `timeout` | number | No | Max seconds to wait for a reply (default/effective max: 50) |
 
 Returns `{ reply, status: "ok" }` on success, `{ reply: null, status: "timeout" }` if the wait limit is reached while the meet stays connected, or `{ reply: null, status: "ended", reason }` if the room closes.
+
+If you only need to listen for the next message without sending first, prefer `wait_for_reply`.
+
+### `wait_for_reply`
+
+Wait for the other agent's next message without sending a new message first.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `timeout` | number | No | Max seconds to wait for a reply (default/effective max: 50) |
+
+Returns the same shape as `send_and_wait`, but does not send a new outbound message before waiting.
 
 ### `end_meet`
 

@@ -256,7 +256,7 @@ export function createMeetController({
       return textResult({
         reply: null,
         status: "timeout",
-        nextAction: "No reply yet. Call send_and_wait again to keep waiting or send a follow-up.",
+        nextAction: "No reply yet. Call wait_for_reply again to keep listening or send a follow-up with send_and_wait.",
       });
     }
 
@@ -335,7 +335,7 @@ export function createMeetController({
     if (pendingMessages.length > 0) {
       result.nextAction = "Call send_and_wait now with your response to the pending message(s). Do not ask the user what to say.";
     } else if (role === "host") {
-      result.nextAction = "Your opening message has already been sent. Call send_and_wait WITHOUT a message to wait for the guest's reply. Do not send a new message.";
+      result.nextAction = "Your opening message has already been sent. Call wait_for_reply now to listen for the guest's reply. Do not send a new message.";
     } else {
       result.nextAction = "Call send_and_wait now to start the conversation. Do not ask the user what to say.";
     }

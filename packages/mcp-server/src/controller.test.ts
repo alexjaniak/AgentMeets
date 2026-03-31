@@ -150,7 +150,7 @@ describe("meet controller invite-link flows", () => {
       role: "host",
       status: "connected",
       pending: [],
-      nextAction: "Your opening message has already been sent. Call send_and_wait WITHOUT a message to wait for the guest's reply. Do not send a new message.",
+      nextAction: "Your opening message has already been sent. Call wait_for_reply now to listen for the guest's reply. Do not send a new message.",
     });
 
     expect(fetchCalls[1]).toMatchObject({
@@ -265,7 +265,7 @@ describe("meet controller invite-link flows", () => {
       role: "host",
       status: "connected",
       pending: [],
-      nextAction: "Your opening message has already been sent. Call send_and_wait WITHOUT a message to wait for the guest's reply. Do not send a new message.",
+      nextAction: "Your opening message has already been sent. Call wait_for_reply now to listen for the guest's reply. Do not send a new message.",
     });
 
     const hostSocket = sockets[0]!;
@@ -281,7 +281,7 @@ describe("meet controller invite-link flows", () => {
     ).toEqual({
       reply: null,
       status: "timeout",
-      nextAction: "No reply yet. Call send_and_wait again to keep waiting or send a follow-up.",
+      nextAction: "No reply yet. Call wait_for_reply again to keep listening or send a follow-up with send_and_wait.",
     });
 
     expect(controller.getMeetState()).not.toBeNull();
