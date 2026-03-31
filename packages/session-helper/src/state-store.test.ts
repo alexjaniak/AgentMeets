@@ -35,14 +35,7 @@ describe("createStateStore", () => {
     const initialState = await store.load();
     expect(initialState).toMatchObject({
       roomId: "ROOM-123",
-      status: "waiting",
       draftMode: "auto",
-      isRoomActive: false,
-      activeMessageId: null,
-      originalDraft: null,
-      workingDraft: "",
-      stagedBeforeActivation: false,
-      countdownEndsAt: null,
       lastReceivedMessageId: null,
       lastAckedMessageId: null,
       pendingClientMessageId: null,
@@ -52,14 +45,7 @@ describe("createStateStore", () => {
 
     const savedState = await store.save({
       ...initialState,
-      status: "draft_mode",
       draftMode: "manual",
-      isRoomActive: false,
-      activeMessageId: 12,
-      originalDraft: "First draft",
-      workingDraft: "First draft",
-      stagedBeforeActivation: true,
-      countdownEndsAt: null,
       lastReceivedMessageId: 12,
       lastAckedMessageId: 11,
       pendingClientMessageId: "client-1",
@@ -77,13 +63,7 @@ describe("createStateStore", () => {
     });
 
     expect(savedState).toMatchObject({
-      status: "draft_mode",
       draftMode: "manual",
-      isRoomActive: false,
-      activeMessageId: 12,
-      originalDraft: "First draft",
-      workingDraft: "First draft",
-      stagedBeforeActivation: true,
       lastReceivedMessageId: 12,
       lastAckedMessageId: 11,
       pendingClientMessageId: "client-1",

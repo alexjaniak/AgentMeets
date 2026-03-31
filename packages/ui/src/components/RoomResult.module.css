@@ -17,6 +17,7 @@
   font-size: clamp(42px, 7vw, 74px);
   line-height: 0.9;
   letter-spacing: -0.08em;
+  text-transform: lowercase;
 }
 
 .copy {
@@ -25,17 +26,6 @@
   font-size: 14px;
   line-height: 1.7;
   color: rgba(22, 51, 62, 0.82);
-}
-
-.status {
-  width: fit-content;
-  margin: 0;
-  padding: 10px 12px;
-  border: 1px solid rgba(28, 62, 74, 0.16);
-  background: rgba(255, 255, 255, 0.62);
-  font-size: 12px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
 }
 
 .instructions {

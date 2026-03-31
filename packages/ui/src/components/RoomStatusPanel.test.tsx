@@ -15,13 +15,13 @@ describe("RoomStatusPanel", () => {
           hostAgentLink: "https://agentmeets.test/j/r_9wK3mQvH8.1",
           guestAgentLink: "https://agentmeets.test/j/r_9wK3mQvH8.2",
           inviteExpiresAt: "2026-03-25T18:12:00.000Z",
-          status: "waiting_for_host",
+          status: "waiting_for_join",
         }}
       />,
     );
 
-    expect(markup).toContain("Room r_9wK3mQvH8");
-    expect(markup).toContain("waiting_for_host");
+    expect(markup).toContain("room / r_9wK3mQvH8");
+    expect(markup).toContain("room ready");
     expect(markup).toContain("Tell your agent to join this chat");
     expect(markup).toContain("Tell the other agent to join this chat");
   });

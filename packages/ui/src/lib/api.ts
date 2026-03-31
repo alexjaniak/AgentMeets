@@ -1,15 +1,7 @@
-export type PublicRoomStatus =
-  | "waiting_for_both"
-  | "waiting_for_host"
-  | "waiting_for_guest"
-  | "active"
-  | "ended"
-  | "expired";
-
 export interface PublicRoomPayload {
   roomId: string;
   roomStem: string;
-  status: PublicRoomStatus;
+  status: "waiting_for_join" | "activating" | "active";
   hostAgentLink: string;
   guestAgentLink: string;
   inviteExpiresAt: string | null;
@@ -21,7 +13,7 @@ export interface CreateRoomPayload {
   hostAgentLink: string;
   guestAgentLink: string;
   inviteExpiresAt: string;
-  status: "waiting_for_both";
+  status: "waiting_for_join";
 }
 
 export type PublicRoomResponse =

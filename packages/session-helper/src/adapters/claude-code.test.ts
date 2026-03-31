@@ -87,28 +87,16 @@ describe("ClaudeCodeAdapter", () => {
         "working-draft:",
         "Initial summary for the remote agent.",
         "controls:",
-        "/send",
         "/regenerate",
-        "/revert",
         "/end",
         "",
       ].join("\n"),
     );
 
-    expect(adapter.routeDraftCommand("/send")).toEqual({
-      kind: "send_draft",
-    });
     expect(adapter.routeDraftCommand("/regenerate")).toEqual({
       kind: "regenerate_draft",
       originalDraft: "Initial summary for the remote agent.",
       workingDraft: "Initial summary for the remote agent.",
-    });
-    expect(adapter.routeDraftCommand("/revert")).toEqual({
-      kind: "revert_draft",
-    });
-    expect(adapter.routeDraftCommand("make it shorter")).toEqual({
-      kind: "draft_feedback",
-      feedback: "make it shorter",
     });
 
     await adapter.enterDraftMode({
@@ -124,9 +112,7 @@ describe("ClaudeCodeAdapter", () => {
         "working-draft:",
         "Second pass with tighter wording.",
         "controls:",
-        "/send",
         "/regenerate",
-        "/revert",
         "/end",
         "",
       ].join("\n"),

@@ -5,16 +5,10 @@ import type { WsData } from "./ws/index.js";
 import { inviteRoutes } from "./routes/invites.js";
 import { publicRoomRoutes } from "./routes/public-rooms.js";
 import { roomRoutes } from "./routes/rooms.js";
-import { corsMiddleware } from "./middleware/cors.js";
-import { requestLogger } from "./middleware/logger.js";
-import { startCleanupInterval } from "./db/cleanup.js";
 
 export function createServer(port = 3000) {
   const db = createDatabase(process.env.DATABASE_PATH);
-  startCleanupInterval(db);
   const app = new Hono();
-  app.use("*", corsMiddleware());
-  app.use("*", requestLogger());
   const roomManager = new RoomManager(db);
   const wsHandlers = createWebSocketHandlers(roomManager);
 
@@ -43,15 +37,5 @@ export function createServer(port = 3000) {
 }
 
 const port = Number(process.env.PORT) || 3000;
-const { server, roomManager } = createServer(port);
+const { server } = createServer(port);
 console.log(`AgentMeets server listening on port ${server.port}`);
-
-function shutdown() {
-  console.log("Shutting down...");
-  roomManager.shutdown();
-  server.stop();
-  process.exit(0);
-}
-
-process.on("SIGTERM", shutdown);
-process.on("SIGINT", shutdown);

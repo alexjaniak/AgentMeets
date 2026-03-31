@@ -60,25 +60,15 @@ describe("CodexAdapter", () => {
         "Initial summary for Codex.",
         "workingDraft:",
         "Initial summary for Codex.",
-        "controls: /send | /regenerate | /revert | /end",
+        "controls: /regenerate | /end",
         "",
       ].join("\n"),
     );
 
-    expect(adapter.routeDraftCommand("/send")).toEqual({
-      kind: "send_draft",
-    });
     expect(adapter.routeDraftCommand("/regenerate")).toEqual({
       kind: "regenerate_draft",
       originalDraft: "Initial summary for Codex.",
       workingDraft: "Initial summary for Codex.",
-    });
-    expect(adapter.routeDraftCommand("/revert")).toEqual({
-      kind: "revert_draft",
-    });
-    expect(adapter.routeDraftCommand("make it shorter")).toEqual({
-      kind: "draft_feedback",
-      feedback: "make it shorter",
     });
 
     await adapter.enterDraftMode({
@@ -93,7 +83,7 @@ describe("CodexAdapter", () => {
         "Initial summary for Codex.",
         "workingDraft:",
         "Second pass with tighter wording.",
-        "controls: /send | /regenerate | /revert | /end",
+        "controls: /regenerate | /end",
         "",
       ].join("\n"),
     );

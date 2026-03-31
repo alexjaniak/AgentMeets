@@ -5,7 +5,6 @@ import {
   createInitialSessionHelperState,
   type SessionHelperState,
   type SessionMessageEvent,
-  type SessionStatus,
   type TerminalState,
 } from "./protocol.js";
 
@@ -89,18 +88,7 @@ function normalizeState(
       typeof input.roomId === "string" && input.roomId.length > 0
         ? input.roomId
         : roomId,
-    status: normalizeStatus(input.status, input.draftMode, input.pendingClientMessageId),
     draftMode: input.draftMode === "manual" ? "manual" : "auto",
-    isRoomActive: input.isRoomActive === true,
-    activeMessageId:
-      typeof input.activeMessageId === "number" ? input.activeMessageId : null,
-    originalDraft:
-      typeof input.originalDraft === "string" ? input.originalDraft : null,
-    workingDraft:
-      typeof input.workingDraft === "string" ? input.workingDraft : "",
-    stagedBeforeActivation: input.stagedBeforeActivation === true,
-    countdownEndsAt:
-      typeof input.countdownEndsAt === "string" ? input.countdownEndsAt : null,
     lastReceivedMessageId:
       typeof input.lastReceivedMessageId === "number"
         ? input.lastReceivedMessageId
@@ -120,33 +108,6 @@ function normalizeState(
       : [],
     terminal: normalizeTerminalState(input.terminal),
   };
-}
-
-function normalizeStatus(
-  input: unknown,
-  draftMode: unknown,
-  pendingClientMessageId: unknown,
-): SessionStatus {
-  if (
-    input === "waiting" ||
-    input === "drafting_reply" ||
-    input === "hold_countdown" ||
-    input === "draft_mode" ||
-    input === "sending" ||
-    input === "ended"
-  ) {
-    return input;
-  }
-
-  if (draftMode === "manual") {
-    return "draft_mode";
-  }
-
-  if (typeof pendingClientMessageId === "string") {
-    return "sending";
-  }
-
-  return "waiting";
 }
 
 function normalizeQueuedInbound(input: unknown): SessionMessageEvent | null {
@@ -225,3 +186,4 @@ function isMissingFileError(error: unknown): boolean {
     error.code === "ENOENT"
   );
 }
+

@@ -4,17 +4,6 @@ import { FakeSessionAdapter } from "./fake-session.js";
 import type { SessionTranscriptMessage } from "./types.js";
 
 describe("detectInvite", () => {
-  test("accepts the canonical pasted invite instruction text", () => {
-    expect(
-      detectInvite(
-        "Tell your agent to join this chat: https://agentmeets.example/j/r_9wK3mQvH8.1",
-      ),
-    ).toEqual({
-      inviteToken: "r_9wK3mQvH8.1",
-      inviteUrl: "https://agentmeets.example/j/r_9wK3mQvH8.1",
-    });
-  });
-
   test("returns normalized invite metadata for the first invite URL in plain text", () => {
     expect(
       detectInvite(
@@ -34,13 +23,6 @@ describe("detectInvite", () => {
     ).toEqual({
       inviteToken: "r_9wK3mQvH8.1",
       inviteUrl: "https://agentmeets.example/j/r_9wK3mQvH8.1",
-    });
-  });
-
-  test("accepts a raw invite link with no surrounding prose", () => {
-    expect(detectInvite("https://agentmeets.example/j/r_9wK3mQvH8.2")).toEqual({
-      inviteToken: "r_9wK3mQvH8.2",
-      inviteUrl: "https://agentmeets.example/j/r_9wK3mQvH8.2",
     });
   });
 

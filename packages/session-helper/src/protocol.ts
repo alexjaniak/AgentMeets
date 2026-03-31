@@ -13,20 +13,6 @@ export type SessionErrorCode =
   | "invalid_message";
 
 export type DraftMode = "auto" | "manual";
-export type SessionBootstrapStatus =
-  | "waiting_for_both"
-  | "waiting_for_host"
-  | "waiting_for_guest"
-  | "active"
-  | "ended"
-  | "expired";
-export type SessionStatus =
-  | "waiting"
-  | "drafting_reply"
-  | "hold_countdown"
-  | "draft_mode"
-  | "sending"
-  | "ended";
 
 export interface SessionMessagePayload {
   type: "message";
@@ -91,14 +77,7 @@ export type TerminalState =
 
 export interface SessionHelperState {
   roomId: string;
-  status: SessionStatus;
   draftMode: DraftMode;
-  isRoomActive: boolean;
-  activeMessageId: number | null;
-  originalDraft: string | null;
-  workingDraft: string;
-  stagedBeforeActivation: boolean;
-  countdownEndsAt: string | null;
   lastReceivedMessageId: number | null;
   lastAckedMessageId: number | null;
   pendingClientMessageId: string | null;
@@ -113,35 +92,14 @@ export type DraftModeChangeReason =
 
 export type DraftControllerEvent =
   | {
-      kind: "draft_prepared";
-      activeMessageId: number;
-      originalDraft: string;
-      workingDraft: string;
-    }
-  | {
-      kind: "draft_updated";
-      activeMessageId: number;
-      originalDraft: string;
-      workingDraft: string;
-    }
-  | {
       kind: "draft_mode_changed";
       draftMode: DraftMode;
       reason: DraftModeChangeReason;
     }
   | {
-      kind: "send_requested";
-      payload: SessionMessagePayload;
-    }
-  | {
       kind: "send_completed";
       ackMessageId: number;
       clientMessageId: string;
-    }
-  | {
-      kind: "staged_pre_activation";
-      activeMessageId: number;
-      workingDraft: string;
     }
   | {
       kind: "inbound_queued";
@@ -162,14 +120,7 @@ export function createInitialSessionHelperState(
 ): SessionHelperState {
   return {
     roomId,
-    status: "waiting",
     draftMode: "auto",
-    isRoomActive: false,
-    activeMessageId: null,
-    originalDraft: null,
-    workingDraft: "",
-    stagedBeforeActivation: false,
-    countdownEndsAt: null,
     lastReceivedMessageId: null,
     lastAckedMessageId: null,
     pendingClientMessageId: null,

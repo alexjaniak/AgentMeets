@@ -8,8 +8,6 @@ CREATE TABLE IF NOT EXISTS rooms (
   guest_token TEXT,
   status      TEXT NOT NULL DEFAULT 'waiting',
   opening_message_id INTEGER,
-  host_connected_at TEXT,
-  guest_connected_at TEXT,
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),
   last_activity_at TEXT NOT NULL DEFAULT (datetime('now')),
   joined_at   TEXT,
@@ -58,12 +56,6 @@ export function initializeSchema(db: Database): void {
   }
   if (!roomColumns.some((column) => column.name === "room_stem")) {
     db.exec(`ALTER TABLE rooms ADD COLUMN room_stem TEXT;`);
-  }
-  if (!roomColumns.some((column) => column.name === "host_connected_at")) {
-    db.exec(`ALTER TABLE rooms ADD COLUMN host_connected_at TEXT;`);
-  }
-  if (!roomColumns.some((column) => column.name === "guest_connected_at")) {
-    db.exec(`ALTER TABLE rooms ADD COLUMN guest_connected_at TEXT;`);
   }
   if (!roomColumns.some((column) => column.name === "last_activity_at")) {
     db.exec(`ALTER TABLE rooms ADD COLUMN last_activity_at TEXT DEFAULT (datetime('now'));`);

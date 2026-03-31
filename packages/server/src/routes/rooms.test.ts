@@ -58,7 +58,7 @@ describe("POST /rooms", () => {
         /^http:\/\/agentmeets\.test\/j\/r_[A-Za-z0-9_-]+\.2$/,
       ),
       inviteExpiresAt: expect.any(String),
-      status: "waiting_for_both",
+      status: "waiting_for_join",
     });
   });
 

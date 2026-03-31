@@ -16,12 +16,6 @@ export interface PendingReplyResult {
   };
 }
 
-export interface StagedDraft {
-  id: string;
-  message: string;
-  originalDraft: string;
-}
-
 export interface MeetState {
   roomId: string;
   token: string;
@@ -35,7 +29,6 @@ export interface MeetState {
   lastReceivedMessageId: number | null;
   lastAckedMessageId: number | null;
   pendingClientMessageId: string | null;
-  stagedDraft: StagedDraft | null;
 }
 
 export type ProcessedServerEvent =
@@ -62,7 +55,6 @@ export function createMeetState(
     lastReceivedMessageId: null,
     lastAckedMessageId: null,
     pendingClientMessageId: null,
-    stagedDraft: null,
   };
 }
 

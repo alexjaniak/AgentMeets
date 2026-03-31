@@ -63,5 +63,5 @@ export function RoomStatusPanel({
 }
 
 function shouldPoll(room: PublicRoomResponse): boolean {
-  return room.kind === "room" && room.status !== "ended";
+  return room.kind === "room" && room.status !== "active";
 }

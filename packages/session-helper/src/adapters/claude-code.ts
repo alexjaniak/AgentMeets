@@ -1,11 +1,6 @@
-import type {
-  DraftCommand,
-  SessionRuntimeAdapter,
-  SessionTranscriptMessage,
-} from "./types.js";
+import type { SessionAdapter, SessionTranscriptMessage } from "./types.js";
 
 const DEFAULT_DRAFT_COMMAND = "/draft <message>";
-const DEFAULT_DRAFT_CONTROLS = ["/send", "/regenerate", "/revert", "/end"];
 
 export interface ClaudeCodeAdapterOptions {
   writeToPty: (chunk: string) => void | Promise<void>;
@@ -23,7 +18,21 @@ export interface ClaudeCodeDraftState {
   workingDraft: string;
 }
 
-export class ClaudeCodeAdapter implements SessionRuntimeAdapter {
+export type ClaudeCodeDraftCommand =
+  | {
+      kind: "submit_draft";
+      content: string;
+    }
+  | {
+      kind: "regenerate_draft";
+      originalDraft: string;
+      workingDraft: string;
+    }
+  | {
+      kind: "end_session";
+    };
+
+export class ClaudeCodeAdapter implements SessionAdapter {
   #transcript: SessionTranscriptMessage[];
   #writeToPty: ClaudeCodeAdapterOptions["writeToPty"];
   #draftCommand: string;
@@ -75,18 +84,6 @@ export class ClaudeCodeAdapter implements SessionRuntimeAdapter {
     originalDraft,
     workingDraft,
   }: ClaudeCodeDraftState): Promise<void> {
-    await this.renderDraftMode({
-      originalDraft,
-      workingDraft,
-      controls: DEFAULT_DRAFT_CONTROLS,
-    });
-  }
-
-  async renderDraftMode({
-    originalDraft,
-    workingDraft,
-    controls,
-  }: ClaudeCodeDraftState & { controls: string[] }): Promise<void> {
     const preservedOriginalDraft =
       this.#draftState?.originalDraft ?? originalDraft;
 
@@ -103,48 +100,17 @@ export class ClaudeCodeAdapter implements SessionRuntimeAdapter {
         "working-draft:",
         workingDraft,
         "controls:",
-        ...controls,
+        "/regenerate",
+        "/end",
         "",
       ].join("\n"),
     );
   }
 
-  async renderLocalSurface(content: string): Promise<void> {
-    await this.#writePrompt(content);
-  }
-
-  async requestDraftRevision({
-    originalDraft,
-    workingDraft,
-    feedback,
-  }: {
-    originalDraft: string;
-    workingDraft: string;
-    feedback: string | null;
-  }): Promise<void> {
-    await this.#writePrompt(
-      [
-        "[agentmeets revise-draft]",
-        "original-draft:",
-        originalDraft,
-        "working-draft:",
-        workingDraft,
-        "feedback:",
-        feedback ?? "(none)",
-        `submit-final-draft: ${this.#draftCommand}`,
-        "",
-      ].join("\n"),
-    );
-  }
-
-  routeDraftCommand(input: string): DraftCommand | null {
+  routeDraftCommand(input: string): ClaudeCodeDraftCommand | null {
     const trimmed = input.trim();
     if (trimmed.length === 0) {
       return null;
-    }
-
-    if (trimmed === "/send") {
-      return { kind: "send_draft" };
     }
 
     if (trimmed === "/regenerate") {
@@ -159,26 +125,11 @@ export class ClaudeCodeAdapter implements SessionRuntimeAdapter {
       };
     }
 
-    if (trimmed === "/revert") {
-      if (!this.#draftState) {
-        return null;
-      }
-
-      return { kind: "revert_draft" };
-    }
-
     if (trimmed === "/end") {
       return { kind: "end_session" };
     }
 
     if (!trimmed.startsWith("/draft")) {
-      if (this.#draftState) {
-        return {
-          kind: "draft_feedback",
-          feedback: trimmed,
-        };
-      }
-
       return null;
     }
 

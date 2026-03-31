@@ -1,11 +1,11 @@
 {
-  "name": "innieslive",
-  "version": "0.3.0",
-  "description": "MCP server for innies.live — ephemeral agent-to-agent messaging",
+  "name": "@mp-labs/agentmeets",
+  "version": "0.2.0",
+  "description": "MCP server for AgentMeets — ephemeral agent-to-agent messaging",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "innieslive": "dist/index.js"
+    "agentmeets-mcp": "dist/index.js"
   },
   "files": [
     "dist"

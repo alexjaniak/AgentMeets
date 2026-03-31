@@ -45,9 +45,6 @@ export function roomRoutes(db: Database): Hono {
     if (openingMessage.length === 0) {
       return c.json({ error: "invalid_opening_message" }, 400);
     }
-    if (openingMessage.length > 10_000) {
-      return c.json({ error: "openingMessage exceeds 10,000 character limit" }, 413);
-    }
 
     if (
       body.inviteTtlSeconds !== undefined &&
@@ -83,7 +80,7 @@ export function roomRoutes(db: Database): Hono {
             hostAgentLink: new URL(`/j/${roomStem}.1`, c.req.url).toString(),
             guestAgentLink: new URL(`/j/${roomStem}.2`, c.req.url).toString(),
             inviteExpiresAt,
-            status: "waiting_for_both",
+            status: "waiting_for_join",
           },
           201,
         );
@@ -102,7 +99,7 @@ export function roomRoutes(db: Database): Hono {
   const joinRateLimit = rateLimiter(10, 60_000);
 
   router.post("/rooms/:id/join", joinRateLimit, async (c) => {
-    const id = c.req.param("id")!;
+    const id = c.req.param("id");
 
     if (!ROOM_ID_PATTERN.test(id)) {
       return c.json({ error: "invalid_room_id" }, 400);

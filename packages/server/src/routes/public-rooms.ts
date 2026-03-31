@@ -1,15 +1,15 @@
 import { Hono } from "hono";
 import type { Database } from "bun:sqlite";
-import { derivePublicRoomStatus } from "@agentmeets/shared";
+import type { RoomStatus } from "@agentmeets/shared";
 import { expireRoom } from "../db/rooms.js";
 
 interface PublicRoomRow {
   room_id: string;
   room_stem: string;
   room_status: "waiting" | "active" | "closed" | "expired";
-  host_connected_at: string | null;
-  guest_connected_at: string | null;
+  guest_token: string | null;
   invite_expires_at: string | null;
+  has_claimed_invite: number;
 }
 
 export function publicRoomRoutes(db: Database): Hono {
@@ -31,7 +31,7 @@ export function publicRoomRoutes(db: Database): Hono {
       {
         roomId: room.room_id,
         roomStem: room.room_stem,
-        status: deriveRouteStatus(room),
+        status: derivePublicRoomStatus(room),
         hostAgentLink: new URL(`/j/${room.room_stem}.1`, c.req.url).toString(),
         guestAgentLink: new URL(`/j/${room.room_stem}.2`, c.req.url).toString(),
         inviteExpiresAt: room.invite_expires_at,
@@ -53,13 +53,13 @@ function getPublicRoomRow(
          r.id AS room_id,
          r.room_stem,
          r.status AS room_status,
-         r.host_connected_at,
-         r.guest_connected_at,
-         MIN(i.expires_at) AS invite_expires_at
+         r.guest_token,
+         MIN(i.expires_at) AS invite_expires_at,
+         MAX(CASE WHEN i.claimed_at IS NOT NULL THEN 1 ELSE 0 END) AS has_claimed_invite
        FROM rooms r
        LEFT JOIN invites i ON i.room_id = r.id
        WHERE r.room_stem = ?
-       GROUP BY r.id, r.room_stem, r.status, r.host_connected_at, r.guest_connected_at`,
+       GROUP BY r.id, r.room_stem, r.status, r.guest_token`,
     )
     .get(roomStem) as PublicRoomRow | null;
 
@@ -71,11 +71,7 @@ function isPublicRoomExpired(db: Database, room: PublicRoomRow): boolean {
     return false;
   }
 
-  if (room.room_status === "closed") {
-    return false;
-  }
-
-  if (room.room_status === "expired") {
+  if (room.room_status === "closed" || room.room_status === "expired") {
     return true;
   }
 
@@ -87,17 +83,29 @@ function isPublicRoomExpired(db: Database, room: PublicRoomRow): boolean {
     return false;
   }
 
-  if (room.room_status === "waiting") {
+  if (room.room_status === "waiting" && room.guest_token === null) {
     expireRoom(db, room.room_id);
   }
 
   return true;
 }
 
-function deriveRouteStatus(room: PublicRoomRow) {
-  return derivePublicRoomStatus({
-    roomStatus: room.room_status,
-    hostConnectedAt: room.host_connected_at,
-    guestConnectedAt: room.guest_connected_at,
-  });
+function derivePublicRoomStatus(room: PublicRoomRow): RoomStatus {
+  if (room.room_status === "active") {
+    return "active";
+  }
+
+  if (room.room_status === "closed") {
+    return "ended";
+  }
+
+  if (room.room_status === "expired") {
+    return "expired";
+  }
+
+  if (room.guest_token !== null || room.has_claimed_invite > 0) {
+    return "activating";
+  }
+
+  return "waiting_for_join";
 }

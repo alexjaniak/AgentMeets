@@ -1,11 +1,6 @@
-import type {
-  DraftCommand,
-  SessionRuntimeAdapter,
-  SessionTranscriptMessage,
-} from "./types.js";
+import type { SessionAdapter, SessionTranscriptMessage } from "./types.js";
 
 const DEFAULT_DRAFT_COMMAND = "/draft <message>";
-const DEFAULT_DRAFT_CONTROLS = ["/send", "/regenerate", "/revert", "/end"];
 
 export interface CodexAdapterOptions {
   writeToPty: (chunk: string) => void | Promise<void>;
@@ -23,7 +18,21 @@ export interface CodexDraftState {
   workingDraft: string;
 }
 
-export class CodexAdapter implements SessionRuntimeAdapter {
+export type CodexDraftCommand =
+  | {
+      kind: "submit_draft";
+      content: string;
+    }
+  | {
+      kind: "regenerate_draft";
+      originalDraft: string;
+      workingDraft: string;
+    }
+  | {
+      kind: "end_session";
+    };
+
+export class CodexAdapter implements SessionAdapter {
   #transcript: SessionTranscriptMessage[];
   #writeToPty: CodexAdapterOptions["writeToPty"];
   #draftCommand: string;
@@ -75,18 +84,6 @@ export class CodexAdapter implements SessionRuntimeAdapter {
     originalDraft,
     workingDraft,
   }: CodexDraftState): Promise<void> {
-    await this.renderDraftMode({
-      originalDraft,
-      workingDraft,
-      controls: DEFAULT_DRAFT_CONTROLS,
-    });
-  }
-
-  async renderDraftMode({
-    originalDraft,
-    workingDraft,
-    controls,
-  }: CodexDraftState & { controls: string[] }): Promise<void> {
     const preservedOriginalDraft =
       this.#draftState?.originalDraft ?? originalDraft;
 
@@ -102,48 +99,16 @@ export class CodexAdapter implements SessionRuntimeAdapter {
         preservedOriginalDraft,
         "workingDraft:",
         workingDraft,
-        `controls: ${controls.join(" | ")}`,
+        "controls: /regenerate | /end",
         "",
       ].join("\n"),
     );
   }
 
-  async renderLocalSurface(content: string): Promise<void> {
-    await this.#writeToPty(content);
-  }
-
-  async requestDraftRevision({
-    originalDraft,
-    workingDraft,
-    feedback,
-  }: {
-    originalDraft: string;
-    workingDraft: string;
-    feedback: string | null;
-  }): Promise<void> {
-    await this.#writeToPty(
-      [
-        "[agentmeets codex revise-draft]",
-        "originalDraft:",
-        originalDraft,
-        "workingDraft:",
-        workingDraft,
-        "feedback:",
-        feedback ?? "(none)",
-        `draft_command=${this.#draftCommand}`,
-        "",
-      ].join("\n"),
-    );
-  }
-
-  routeDraftCommand(input: string): DraftCommand | null {
+  routeDraftCommand(input: string): CodexDraftCommand | null {
     const trimmed = input.trim();
     if (trimmed.length === 0) {
       return null;
-    }
-
-    if (trimmed === "/send") {
-      return { kind: "send_draft" };
     }
 
     if (trimmed === "/regenerate") {
@@ -158,26 +123,11 @@ export class CodexAdapter implements SessionRuntimeAdapter {
       };
     }
 
-    if (trimmed === "/revert") {
-      if (!this.#draftState) {
-        return null;
-      }
-
-      return { kind: "revert_draft" };
-    }
-
     if (trimmed === "/end") {
       return { kind: "end_session" };
     }
 
     if (!trimmed.startsWith("/draft")) {
-      if (this.#draftState) {
-        return {
-          kind: "draft_feedback",
-          feedback: trimmed,
-        };
-      }
-
       return null;
     }
 
