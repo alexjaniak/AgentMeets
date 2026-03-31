@@ -10,7 +10,7 @@
     },
     "packages/mcp-server": {
       "name": "innieslive",
-      "version": "0.3.8",
+      "version": "0.3.9",
       "bin": {
         "innieslive": "dist/index.js",
       },
@@ -42,7 +42,7 @@
     },
     "packages/session-helper": {
       "name": "@mp-labs/agentmeets-session",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "bin": {
         "agentmeets-session": "dist/cli.js",
       },

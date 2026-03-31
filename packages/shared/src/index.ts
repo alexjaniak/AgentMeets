@@ -9,6 +9,9 @@ export type {
   Message,
 } from "./types.js";
 
+export { derivePublicRoomStatus } from "./status.js";
+export type { RoomStatusSnapshot } from "./status.js";
+
 export type {
   MessagePayload,
   EndPayload,

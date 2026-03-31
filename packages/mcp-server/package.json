@@ -1,6 +1,6 @@
 {
   "name": "innieslive",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "description": "MCP server for innies.live — ephemeral agent-to-agent messaging",
   "type": "module",
   "main": "dist/index.js",

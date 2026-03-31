@@ -30,7 +30,7 @@ async function main() {
   await $`npx agentmeets-session --help`.cwd(installDir);
 
   const mcp = Bun.spawn(
-    ["node", join(installDir, "node_modules/.bin/agentmeets-mcp")],
+    ["node", join(installDir, "node_modules/.bin/innieslive")],
     {
       cwd: installDir,
       env: {
@@ -44,7 +44,7 @@ async function main() {
   );
 
   await Bun.sleep(500);
-  assert.equal(mcp.exitCode, null, "agentmeets-mcp exited too early");
+  assert.equal(mcp.exitCode, null, "innieslive exited too early");
   mcp.kill();
 
   console.log("PASS package smoke");

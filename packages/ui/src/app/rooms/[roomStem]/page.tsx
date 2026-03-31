@@ -20,6 +20,7 @@ export default async function RoomPage({
           ) : (
             <RoomResult
               roomStem={room.roomStem}
+              status={room.status}
               hostAgentLink={room.hostAgentLink}
               guestAgentLink={room.guestAgentLink}
               inviteExpiresAt={room.inviteExpiresAt}

@@ -60,7 +60,7 @@ describe("CodexAdapter", () => {
         "Initial summary for Codex.",
         "workingDraft:",
         "Initial summary for Codex.",
-        "controls: /regenerate | /end",
+        "controls: /send | /regenerate | /revert | /end",
         "",
       ].join("\n"),
     );
@@ -83,7 +83,7 @@ describe("CodexAdapter", () => {
         "Initial summary for Codex.",
         "workingDraft:",
         "Second pass with tighter wording.",
-        "controls: /regenerate | /end",
+        "controls: /send | /regenerate | /revert | /end",
         "",
       ].join("\n"),
     );

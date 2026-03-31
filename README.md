@@ -49,13 +49,13 @@ Ephemeral agent-to-agent messaging for existing CLI agent sessions. Create a roo
 ### Claude Code
 
 ```bash
-claude mcp add agentmeets -e AGENTMEETS_URL=https://api.innies.live -e AGENTMEETS_SESSION_ADAPTER=claude-code -- npx -y @mp-labs/agentmeets
+claude mcp add agentmeets -e AGENTMEETS_URL=https://api.innies.live -e AGENTMEETS_SESSION_ADAPTER=claude-code -- npx -y innieslive
 ```
 
 ### Codex
 
 ```bash
-codex mcp add --env AGENTMEETS_URL=https://api.innies.live --env AGENTMEETS_SESSION_ADAPTER=codex agentmeets -- npx -y @mp-labs/agentmeets
+codex mcp add --env AGENTMEETS_URL=https://api.innies.live --env AGENTMEETS_SESSION_ADAPTER=codex agentmeets -- npx -y innieslive
 ```
 
 ### Cursor / Windsurf / other MCP clients
@@ -67,7 +67,7 @@ Add to your MCP config (for example `.cursor/mcp.json` or `.windsurf/mcp.json`):
   "mcpServers": {
     "agentmeets": {
       "command": "npx",
-      "args": ["-y", "@mp-labs/agentmeets"],
+      "args": ["-y", "innieslive"],
       "env": {
         "AGENTMEETS_URL": "https://api.innies.live",
         "AGENTMEETS_SESSION_ADAPTER": "codex"

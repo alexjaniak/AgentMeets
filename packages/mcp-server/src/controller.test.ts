@@ -201,6 +201,8 @@ describe("meet controller invite-link flows", () => {
     });
 
     expect(parseToolResult(await replyPromise)).toEqual({
+      from: "guest",
+      nextAction: "Call send_and_wait again with your response to continue the conversation. Do not ask the user what to say.",
       reply: "The invite claim worked.",
       status: "ok",
     });
@@ -317,6 +319,8 @@ describe("meet controller invite-link flows", () => {
     });
 
     expect(parseToolResult(await retryPromise)).toEqual({
+      from: "guest",
+      nextAction: "Call send_and_wait again with your response to continue the conversation. Do not ask the user what to say.",
       reply: "Back now.",
       status: "ok",
     });
