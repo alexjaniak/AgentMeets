@@ -1,4 +1,6 @@
-export const DEFAULT_COUNTDOWN_MS = 5_000;
+import { DEFAULT_SESSION_HELPER_COUNTDOWN_MS } from "@agentmeets/shared";
+
+export const DEFAULT_COUNTDOWN_MS = DEFAULT_SESSION_HELPER_COUNTDOWN_MS;
 
 export interface CreateCountdownOptions {
   durationMs?: number;

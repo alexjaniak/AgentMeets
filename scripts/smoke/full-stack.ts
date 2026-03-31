@@ -45,7 +45,7 @@ interface InviteClaimResponse {
   role: "host" | "guest";
   sessionToken: string;
   guestToken?: string;
-  status: string;
+  status: "activating";
 }
 
 type ServerEvent = Record<string, unknown>;
@@ -118,7 +118,7 @@ async function runSmokeScenarios({
         const room = await createRoom(serverBaseUrl, {
           openingMessage: "Direct room creation smoke.",
         });
-        assert.equal(room.status, "waiting_for_both");
+        assert.equal(room.status, "waiting_for_join");
         assert.match(room.roomId, /^[A-Z0-9]{6}$/);
         assert.match(room.roomStem, /^r_[A-Za-z0-9_-]+$/);
         assert.match(room.hostAgentLink, /\.1$/);
@@ -131,13 +131,13 @@ async function runSmokeScenarios({
         const room = await createRoom(`${uiBaseUrl}/api`, {
           openingMessage: "UI proxy room creation smoke.",
         });
-        assert.equal(room.status, "waiting_for_both");
+        assert.equal(room.status, "waiting_for_join");
         assert.match(room.hostAgentLink, /\.1$/);
         assert.match(room.guestAgentLink, /\.2$/);
       },
     },
     {
-      name: "public room payload returns waiting_for_both before any claim",
+      name: "public room payload returns waiting_for_join before any claim",
       run: async () => {
         const room = await createRoom(serverBaseUrl, {
           openingMessage: "Public room waiting state smoke.",
@@ -145,7 +145,7 @@ async function runSmokeScenarios({
         const publicRoom = await requestJson<PublicRoomResponse>(
           `${serverBaseUrl}/public/rooms/${room.roomStem}`,
         );
-        assert.equal(publicRoom.status, "waiting_for_both");
+        assert.equal(publicRoom.status, "waiting_for_join");
         assert.equal(publicRoom.roomId, room.roomId);
         assert.equal(publicRoom.roomStem, room.roomStem);
       },
@@ -160,7 +160,7 @@ async function runSmokeScenarios({
         );
         assert.equal(manifest.role, "guest");
         assert.equal(manifest.openingMessage, openingMessage);
-        assert.equal(manifest.status, "waiting_for_both");
+        assert.equal(manifest.status, "waiting_for_join");
         assert.ok(Date.parse(manifest.expiresAt) > Date.now());
       },
     },
@@ -200,36 +200,20 @@ async function runSmokeScenarios({
         );
 
         const hostSocket = connectRoomSocket(serverBaseUrl, room.roomId, hostClaim.sessionToken);
+        const guestSocket = connectRoomSocket(serverBaseUrl, room.roomId, guestClaim.sessionToken);
 
         try {
           await waitForWsOpen(hostSocket.ws);
+          await waitForWsOpen(guestSocket.ws);
 
-          // Host gets opening message replay immediately on connect
-          const hostReplay = await hostSocket.nextEvent();
-          assert.equal(hostReplay.type, "message");
-          assert.equal(hostReplay.sender, "host");
+          const hostActivation = await hostSocket.nextEvent();
+          const guestActivation = await guestSocket.nextEvent();
 
-          const guestSocket = connectRoomSocket(serverBaseUrl, room.roomId, guestClaim.sessionToken);
-
-          try {
-            await waitForWsOpen(guestSocket.ws);
-
-            // Guest gets opening message replay
-            const guestReplay = await guestSocket.nextEvent();
-            assert.equal(guestReplay.type, "message");
-            assert.equal(guestReplay.sender, "host");
-
-            // Both get room_active after activation
-            const hostActivation = await hostSocket.nextEvent();
-            const guestActivation = await guestSocket.nextEvent();
-
-            assert.equal(hostActivation.type, "room_active");
-            assert.equal(guestActivation.type, "room_active");
-          } finally {
-            guestSocket.close();
-          }
+          assert.equal(hostActivation.type, "room_active");
+          assert.equal(guestActivation.type, "room_active");
         } finally {
           hostSocket.close();
+          guestSocket.close();
         }
       },
     },
@@ -254,13 +238,6 @@ async function runSmokeScenarios({
 
         try {
           await waitForWsOpen(guestSocket.ws);
-
-          // Guest gets opening message replay immediately on connect
-          const guestOpeningReplay = await guestSocket.nextEvent();
-          assert.equal(guestOpeningReplay.type, "message");
-          assert.equal(guestOpeningReplay.sender, "host");
-          assert.equal(guestOpeningReplay.content, "Opening context for guest-first replay.");
-
           sendClientMessage(guestSocket.ws, {
             clientMessageId: "guest-prejoin-1",
             replyToMessageId: null,
@@ -275,24 +252,20 @@ async function runSmokeScenarios({
           try {
             await waitForWsOpen(hostSocket.ws);
 
-            // Host gets room_active (guest was already connected)
             const hostActivation = await hostSocket.nextEvent();
-            assert.equal(hostActivation.type, "room_active");
-
-            // Host gets opening message replay
-            const hostOpeningReplay = await hostSocket.nextEvent();
-            assert.equal(hostOpeningReplay.type, "message");
-            assert.equal(hostOpeningReplay.sender, "host");
-
-            // Host gets guest's pre-join message replay
-            const hostGuestReplay = await hostSocket.nextEvent();
-            assert.equal(hostGuestReplay.type, "message");
-            assert.equal(hostGuestReplay.sender, "guest");
-            assert.equal(hostGuestReplay.content, "Guest context before host arrives.");
-
-            // Guest gets room_active
+            const hostReplay = await hostSocket.nextEvent();
             const guestActivation = await guestSocket.nextEvent();
+            const guestReplay = await guestSocket.nextEvent();
+
+            assert.equal(hostActivation.type, "room_active");
+            assert.equal(hostReplay.type, "message");
+            assert.equal(hostReplay.sender, "guest");
+            assert.equal(hostReplay.content, "Guest context before host arrives.");
+
             assert.equal(guestActivation.type, "room_active");
+            assert.equal(guestReplay.type, "message");
+            assert.equal(guestReplay.sender, "host");
+            assert.equal(guestReplay.content, "Opening context for guest-first replay.");
           } finally {
             hostSocket.close();
           }
@@ -426,13 +399,8 @@ async function runSmokeScenarios({
 
         const db = new Database(databasePath);
         try {
-          const pastTime = new Date(Date.now() - 11 * 60 * 1000).toISOString();
           db.prepare(`UPDATE rooms SET last_activity_at = ? WHERE id = ?`).run(
-            pastTime,
-            room.roomId,
-          );
-          db.prepare(`UPDATE invites SET expires_at = ? WHERE room_id = ?`).run(
-            pastTime,
+            new Date(Date.now() - 11 * 60 * 1000).toISOString(),
             room.roomId,
           );
         } finally {
@@ -635,27 +603,20 @@ async function connectActiveRoom(
     `${room.roomId}-guest-active`,
   );
 
-  // Connect host first to get deterministic event ordering
   const hostSocket = connectRoomSocket(serverBaseUrl, room.roomId, hostClaim.sessionToken);
-  await waitForWsOpen(hostSocket.ws);
-
-  // Host gets opening message replay immediately
-  const hostReplay = await hostSocket.nextEvent();
-  assert.equal(hostReplay.type, "message");
-
   const guestSocket = connectRoomSocket(serverBaseUrl, room.roomId, guestClaim.sessionToken);
+
+  await waitForWsOpen(hostSocket.ws);
   await waitForWsOpen(guestSocket.ws);
 
-  // Guest gets opening message replay
-  const guestOpeningReplay = await guestSocket.nextEvent();
-  assert.equal(guestOpeningReplay.type, "message");
-  assert.equal(guestOpeningReplay.sender, "host");
-
-  // Both get room_active after activation
   const hostActivation = await hostSocket.nextEvent();
   const guestActivation = await guestSocket.nextEvent();
   assert.equal(hostActivation.type, "room_active");
   assert.equal(guestActivation.type, "room_active");
+
+  const guestOpeningReplay = await guestSocket.nextEvent();
+  assert.equal(guestOpeningReplay.type, "message");
+  assert.equal(guestOpeningReplay.sender, "host");
 
   return { hostSocket, guestSocket };
 }

@@ -96,7 +96,7 @@ describe("meet controller invite-link flows", () => {
               hostAgentLink: "https://agentmeets.test/j/r_9wK3mQvH8.1",
               guestAgentLink: "https://agentmeets.test/j/r_9wK3mQvH8.2",
               inviteExpiresAt: "2026-03-25T18:12:00.000Z",
-              status: "waiting_for_both",
+              status: "waiting_for_join",
             }),
             {
               status: 201,
@@ -135,29 +135,9 @@ describe("meet controller invite-link flows", () => {
         openingMessage: "Let's debug the release pipeline.",
       }),
     ) as {
-      roomLabel: string;
-      status: string;
+      roomId: string;
       yourAgentLink: string;
-      otherAgentLink: string;
-      yourAgentInstruction: string;
-      otherAgentInstruction: string;
-      hostHelperCommand?: string;
     };
-
-    expect(created).toMatchObject({
-      roomLabel: "Room r_9wK3mQvH8",
-      status: "waiting_for_both",
-      yourAgentLink: "https://agentmeets.test/j/r_9wK3mQvH8.1",
-      otherAgentLink: "https://agentmeets.test/j/r_9wK3mQvH8.2",
-      yourAgentInstruction:
-        "Join this chat now: https://agentmeets.test/j/r_9wK3mQvH8.1",
-      sendToOtherPerson:
-        "Install the innieslive MCP server if you haven't already: npx innieslive@latest\n" +
-        "Then paste this into your agent: https://agentmeets.test/j/r_9wK3mQvH8.2",
-    });
-    expect((created as Record<string, unknown>).roomId).toBeUndefined();
-    expect((created as Record<string, unknown>).shareText).toBeUndefined();
-    expect(created.hostHelperCommand).toBeUndefined();
 
     expect(
       parseToolResult(
@@ -184,25 +164,10 @@ describe("meet controller invite-link flows", () => {
     const hostSocket = sockets[0]!;
     hostSocket.emitMessage({ type: "room_active" });
 
-    // Stage a draft
-    const stageResult = parseToolResult(
-      await controller.sendAndWait({
-        message: "What changed?",
-        timeout: 1,
-      }),
-    );
-    expect(stageResult.status).toBe("staged");
-    expect(stageResult.holdSeconds).toBe(5);
-    const draftId = stageResult.draftId as string;
-
-    // Confirm send
-    const replyPromise = controller.confirmSend({
-      draftId,
+    const replyPromise = controller.sendAndWait({
+      message: "What changed?",
       timeout: 1,
     });
-
-    // Wait a tick for the send to execute
-    await new Promise((r) => setTimeout(r, 10));
 
     const outboundMessage = JSON.parse(hostSocket.sent[0]!) as {
       type: string;
@@ -233,7 +198,7 @@ describe("meet controller invite-link flows", () => {
       createdAt: "2026-03-25T18:12:02.000Z",
     });
 
-    expect(parseToolResult(await replyPromise)).toMatchObject({
+    expect(parseToolResult(await replyPromise)).toEqual({
       reply: "The invite claim worked.",
       status: "ok",
     });
@@ -242,6 +207,113 @@ describe("meet controller invite-link flows", () => {
       status: "ended",
     });
     expect(JSON.parse(hostSocket.sent[1]!)).toEqual({ type: "end" });
+  });
+
+  test("sendAndWait timeout keeps the meet alive for a later retry", async () => {
+    const module = await import("./controller.js").catch(() => null);
+
+    expect(module).not.toBeNull();
+    if (!module) {
+      return;
+    }
+
+    const sockets: FakeWebSocket[] = [];
+
+    const controller = module.createMeetController({
+      serverUrl: "https://agentmeets.test",
+      fetchFn: async (input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url === "https://agentmeets.test/invites/r_9wK3mQvH8.1/claim") {
+          return new Response(
+            JSON.stringify({
+              roomId: "ROOM01",
+              role: "host",
+              sessionToken: "host-session-token",
+              status: "activating",
+            }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            },
+          );
+        }
+
+        throw new Error(`Unexpected fetch: ${url}`);
+      },
+      webSocketFactory(url: string) {
+        const ws = new FakeWebSocket(url);
+        sockets.push(ws);
+        return ws as unknown as WebSocket;
+      },
+      settleDelayMs: 0,
+    });
+
+    expect(
+      parseToolResult(
+        await controller.hostMeet({
+          participantLink: "https://agentmeets.test/j/r_9wK3mQvH8.1",
+        }),
+      ),
+    ).toEqual({
+      roomId: "ROOM01",
+      status: "connected",
+      pending: [],
+    });
+
+    const hostSocket = sockets[0]!;
+    hostSocket.emitMessage({ type: "room_active" });
+
+    expect(
+      parseToolResult(
+        await controller.sendAndWait({
+          message: "Still there?",
+          timeout: 0,
+        }),
+      ),
+    ).toEqual({
+      reply: null,
+      status: "timeout",
+    });
+
+    expect(controller.getMeetState()).not.toBeNull();
+
+    const retryPromise = controller.sendAndWait({
+      message: "Trying again.",
+      timeout: 1,
+    });
+
+    const retryOutbound = JSON.parse(hostSocket.sent[1]!) as {
+      clientMessageId: string;
+      content: string;
+      replyToMessageId: number | null;
+    };
+    expect(retryOutbound).toMatchObject({
+      content: "Trying again.",
+      replyToMessageId: null,
+    });
+
+    hostSocket.emitMessage({
+      type: "ack",
+      messageId: 3,
+      clientMessageId: retryOutbound.clientMessageId,
+      replyToMessageId: null,
+      createdAt: "2026-03-25T18:12:03.000Z",
+    });
+    hostSocket.emitMessage({
+      type: "message",
+      messageId: 4,
+      sender: "guest",
+      clientMessageId: "guest-retry-1",
+      replyToMessageId: 3,
+      content: "Back now.",
+      createdAt: "2026-03-25T18:12:04.000Z",
+    });
+
+    expect(parseToolResult(await retryPromise)).toEqual({
+      reply: "Back now.",
+      status: "ok",
+    });
   });
 
   test("host_meet rejects guest invite links before claiming them", async () => {
@@ -267,7 +339,7 @@ describe("meet controller invite-link flows", () => {
             hostAgentLink: "https://agentmeets.test/j/r_9wK3mQvH8.1",
             guestAgentLink: "https://agentmeets.test/j/r_9wK3mQvH8.2",
             inviteExpiresAt: "2026-03-25T18:12:00.000Z",
-            status: "waiting_for_both",
+            status: "waiting_for_join",
           }),
           {
             status: 201,
@@ -325,7 +397,7 @@ describe("meet controller invite-link flows", () => {
               hostAgentLink: "https://agentmeets.test/j/r_9wK3mQvH8.1",
               guestAgentLink: "https://agentmeets.test/j/r_9wK3mQvH8.2",
               inviteExpiresAt: "2026-03-25T18:12:00.000Z",
-              status: "waiting_for_both",
+              status: "waiting_for_join",
             }),
             {
               status: 201,

@@ -9,12 +9,13 @@ function parseToolResult(result: {
 }
 
 describe("create_meet", () => {
-  test("returns room identity and invite instructions from the unified paired-room contract", async () => {
+  test("returns host and guest links from the unified paired-room contract", async () => {
     let requestedUrl = "";
     let requestedInit: RequestInit | undefined;
 
     const handler = createCreateMeetHandler({
       serverUrl: "https://agentmeets.test",
+      sessionAdapterName: "codex",
       fetchFn: async (input, init) => {
         requestedUrl = String(input);
         requestedInit = init;
@@ -25,7 +26,7 @@ describe("create_meet", () => {
             hostAgentLink: "https://agentmeets.test/j/r_9wK3mQvH8.1",
             guestAgentLink: "https://agentmeets.test/j/r_9wK3mQvH8.2",
             inviteExpiresAt: "2026-03-25T18:12:00.000Z",
-            status: "waiting_for_both",
+            status: "waiting_for_join",
           }),
           {
             status: 201,
@@ -50,21 +51,16 @@ describe("create_meet", () => {
       inviteTtlSeconds: 900,
     });
 
-    const payload = parseToolResult(result);
-    expect(payload).toMatchObject({
-      roomLabel: "Room r_9wK3mQvH8",
-      status: "waiting_for_both",
+    expect(parseToolResult(result)).toEqual({
+      roomId: "ROOM01",
       yourAgentLink: "https://agentmeets.test/j/r_9wK3mQvH8.1",
       otherAgentLink: "https://agentmeets.test/j/r_9wK3mQvH8.2",
-      yourAgentInstruction:
-        "Join this chat now: https://agentmeets.test/j/r_9wK3mQvH8.1",
-      sendToOtherPerson:
-        "Install the innieslive MCP server if you haven't already: npx innieslive@latest\n" +
-        "Then paste this into your agent: https://agentmeets.test/j/r_9wK3mQvH8.2",
+      shareText:
+        "Tell the other agent to join this chat: https://agentmeets.test/j/r_9wK3mQvH8.2",
+      status: "waiting_for_join",
+      hostHelperCommand:
+        "AGENTMEETS_URL='https://agentmeets.test' npx -y @mp-labs/agentmeets-session host --participant-link 'https://agentmeets.test/j/r_9wK3mQvH8.1' --adapter codex",
     });
-    expect(payload.roomId).toBeUndefined();
-    expect(payload.shareText).toBeUndefined();
-    expect(payload.hostHelperCommand).toBeUndefined();
   });
 
   test("rejects a blank openingMessage before calling the server", async () => {

@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { AnySchema } from "@modelcontextprotocol/sdk/server/zod-compat.js";
+import { DEFAULT_SEND_AND_WAIT_TIMEOUT_SECONDS } from "@agentmeets/shared";
 import * as z from "zod/v4";
 import { createMeetController } from "./controller.js";
 import { createMeetInputSchema } from "./tools/create-meet.js";
@@ -10,7 +11,8 @@ const env =
     process?: { env?: Record<string, string | undefined> };
   }).process?.env ?? {};
 const SERVER_URL =
-  env.AGENTMEETS_URL?.replace(/\/$/, "") || "https://api.innies.live";
+  env.AGENTMEETS_URL?.replace(/\/$/, "") || "http://localhost:3000";
+const SESSION_ADAPTER = env.AGENTMEETS_SESSION_ADAPTER?.trim();
 
 const hostMeetInputSchema = z.object({
   participantLink: z
@@ -25,49 +27,37 @@ const guestMeetInputSchema = z.object({
 });
 
 const sendAndWaitInputSchema = z.object({
-  message: z.string().describe("The message to stage for review before sending"),
+  message: z.string().describe("Message to send"),
   timeout: z
     .number()
     .optional()
-    .default(120)
-    .describe("Timeout in seconds for waiting after confirm_send (default: 120)"),
+    .default(DEFAULT_SEND_AND_WAIT_TIMEOUT_SECONDS)
+    .describe("Max seconds to wait for reply"),
 });
 
-const confirmSendInputSchema = z.object({
-  draftId: z
-    .string()
-    .optional()
-    .describe(
-      "The draftId from the send_and_wait staging result. " +
-      "Omit to use listen-only mode (wait for inbound message without sending).",
-    ),
-  timeout: z
-    .number()
-    .optional()
-    .default(120)
-    .describe("Timeout in seconds to wait for the other participant's reply (default: 120)"),
-});
-
-const reviseDraftInputSchema = z.object({
-  draftId: z.string().describe("The draftId from the send_and_wait staging result"),
-  revisedMessage: z.string().describe("The updated message content"),
+const joinMeetInputSchema = z.object({
+  roomId: z.string().describe("Room code to join"),
 });
 
 const controller = createMeetController({
   serverUrl: SERVER_URL,
   fetchFn: fetch,
+  sessionAdapterName:
+    SESSION_ADAPTER === "claude-code" || SESSION_ADAPTER === "codex"
+      ? SESSION_ADAPTER
+      : undefined,
 });
 
 const server = new McpServer({
   name: "agentmeets",
-  version: "0.3.0",
+  version: "0.2.0",
 });
 
 server.registerTool<AnySchema, AnySchema>(
   "create_meet",
   {
     description:
-      "Create a new AgentMeets room and return its room label plus copy-ready invite instructions for both agents.",
+      "Create a new AgentMeets room and return the invite link plus host helper bootstrap command.",
     inputSchema: createMeetInputSchema as unknown as AnySchema,
   },
   async (args: unknown) =>
@@ -78,13 +68,8 @@ server.registerTool<AnySchema, AnySchema>(
   "host_meet",
   {
     description:
-      "Claim the host participant link and connect this MCP session as the host. " +
-      "The participantLink is a URL matching the pattern: innies.live/j/<stem>.1 " +
-      "(or any AgentMeets server URL ending in .1). " +
-      "If the user pastes a message containing a URL matching this pattern, " +
-      "call this tool automatically with that URL as participantLink.",
+      "Claim the host participant link from create_meet and connect this MCP session as the host.",
     inputSchema: hostMeetInputSchema as unknown as AnySchema,
-    annotations: { readOnlyHint: false },
   },
   async (args: unknown) =>
     controller.hostMeet(args as { participantLink: string }),
@@ -94,62 +79,31 @@ server.registerTool<AnySchema, AnySchema>(
   "guest_meet",
   {
     description:
-      "Claim the guest participant invite link and connect this MCP session as the guest. " +
-      "The participantLink is a URL matching the pattern: innies.live/j/<stem>.2 " +
-      "(or any AgentMeets server URL ending in .2). " +
-      "If the user pastes a message containing a URL matching this pattern, " +
-      "call this tool automatically with that URL as participantLink.",
+      "Claim the guest participant invite link and connect this MCP session as the guest.",
     inputSchema: guestMeetInputSchema as unknown as AnySchema,
-    annotations: { readOnlyHint: false },
   },
   async (args: unknown) =>
     controller.guestMeet(args as { participantLink: string }),
 );
 
 server.registerTool<AnySchema, AnySchema>(
+  "join_meet",
+  {
+    description: "Join an existing room by room code",
+    inputSchema: joinMeetInputSchema as unknown as AnySchema,
+  },
+  async (args: unknown) =>
+    controller.joinMeet(args as { roomId: string }),
+);
+
+server.registerTool<AnySchema, AnySchema>(
   "send_and_wait",
   {
-    description:
-      "Stage a draft message for review. Does NOT send immediately. " +
-      "The draft is shown to the human for approval. After staging, wait approximately 5 seconds " +
-      "(as indicated by holdSeconds in the response), then call confirm_send to deliver it. " +
-      "If the human says anything during the hold (edit request, feedback, 'change X'), " +
-      "use revise_draft instead of confirm_send. " +
-      "If the human says 'send it' or similar, call confirm_send immediately without waiting.",
+    description: "Send a message and wait for a reply from the other participant",
     inputSchema: sendAndWaitInputSchema as unknown as AnySchema,
-    annotations: { readOnlyHint: false },
   },
   async (args: unknown) =>
-    controller.sendAndWait(args as { message: string; timeout?: number }),
-);
-
-server.registerTool<AnySchema, AnySchema>(
-  "confirm_send",
-  {
-    description:
-      "Send the staged draft and wait for the other participant's reply. " +
-      "Call this after the human approves the draft (or after the ~5-second hold with no intervention). " +
-      "Returns the other participant's reply message. " +
-      "Listen-only mode: omit draftId to wait for an inbound message without sending anything. " +
-      "Use this after host_meet when waiting for the guest's first reply to the opening message.",
-    inputSchema: confirmSendInputSchema as unknown as AnySchema,
-    annotations: { readOnlyHint: false },
-  },
-  async (args: unknown) =>
-    controller.confirmSend(args as { draftId: string; timeout?: number }),
-);
-
-server.registerTool<AnySchema, AnySchema>(
-  "revise_draft",
-  {
-    description:
-      "Revise the staged draft content. Use this when the human wants changes before sending. " +
-      "After revising, show the updated draft to the human and wait for approval before calling confirm_send.",
-    inputSchema: reviseDraftInputSchema as unknown as AnySchema,
-    annotations: { readOnlyHint: false },
-  },
-  async (args: unknown) =>
-    controller.reviseDraft(args as { draftId: string; revisedMessage: string }),
+    controller.sendAndWait(args as { message: string; timeout: number }),
 );
 
 server.tool(

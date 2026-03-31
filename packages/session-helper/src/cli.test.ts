@@ -20,26 +20,6 @@ interface TestCliEnvironment {
       participantLink: string;
     }) => Promise<void>;
   };
-  cwd?: () => string;
-  bootstrapInviteRuntime?: (input: {
-    pastedText: string;
-    adapterName: string;
-  }) => Promise<{
-    roomId: string;
-    role: "host" | "guest";
-    roomLabel: string;
-    status: string;
-    wsUrl: string;
-  }>;
-  createRuntime?: (input: {
-    rootDir: string;
-    roomId: string;
-    role: "host" | "guest";
-    roomLabel: string;
-    initialStatus: string;
-    wsUrl: string;
-    adapter: unknown;
-  }) => Promise<unknown>;
 }
 
 function createTestCliEnvironment() {
@@ -51,15 +31,6 @@ function createTestCliEnvironment() {
     participantLink: string;
   }> = [];
   const adapterNames: string[] = [];
-  const bootstrapCalls: Array<{ pastedText: string; adapterName: string }> = [];
-  const runtimeCalls: Array<{
-    rootDir: string;
-    roomId: string;
-    role: "host" | "guest";
-    roomLabel: string;
-    initialStatus: string;
-    wsUrl: string;
-  }> = [];
 
   const environment: TestCliEnvironment = {
     env: {},
@@ -80,9 +51,6 @@ function createTestCliEnvironment() {
       ttyWrites.push(chunk);
     },
     closeTty() {},
-    cwd() {
-      return "/tmp/agentmeets-runtime-root";
-    },
     createAdapter(options) {
       adapterNames.push(options.adapterName);
       return {
@@ -100,20 +68,6 @@ function createTestCliEnvironment() {
         },
       };
     },
-    async bootstrapInviteRuntime(input) {
-      bootstrapCalls.push(input);
-      return {
-        roomId: "ROOM-789",
-        role: "guest",
-        roomLabel: "Room r_9wK3mQvH8",
-        status: "waiting_for_host",
-        wsUrl: "ws://agentmeets.test/rooms/ROOM-789/ws?token=guest-session-token",
-      };
-    },
-    async createRuntime(input) {
-      runtimeCalls.push(input);
-      return {};
-    },
   };
 
   return {
@@ -123,8 +77,6 @@ function createTestCliEnvironment() {
     ttyWrites,
     adapterCalls,
     adapterNames,
-    bootstrapCalls,
-    runtimeCalls,
   };
 }
 
@@ -141,7 +93,7 @@ describe("session-helper CLI", () => {
     const participantLink = "https://agentmeets.test/j/r_9wK3mQvH8.1";
 
     const exitCode = await (module.main as any)(
-      ["host", "--participant-link", participantLink],
+      ["host", "--participant-link", participantLink, "--adapter", "claude-code"],
       harness.environment,
     );
 
@@ -153,7 +105,7 @@ describe("session-helper CLI", () => {
     expect(harness.adapterNames).toEqual(["claude-code"]);
   });
 
-  test("host mode auto-detects Codex when Codex session markers are present", async () => {
+  test("host mode uses AGENTMEETS_SESSION_ADAPTER when configured", async () => {
     const module = await import("./cli.js").catch(() => null);
 
     expect(module).not.toBeNull();
@@ -163,7 +115,7 @@ describe("session-helper CLI", () => {
 
     const harness = createTestCliEnvironment();
     harness.environment.env = {
-      CODEX_THREAD_ID: "thread-123",
+      AGENTMEETS_SESSION_ADAPTER: "codex",
     };
     const participantLink = "https://agentmeets.test/j/r_9wK3mQvH8.1";
 
@@ -192,7 +144,7 @@ describe("session-helper CLI", () => {
     const participantLink = "https://agentmeets.test/j/r_9wK3mQvH8.2";
 
     const exitCode = await (module.main as any)(
-      ["guest", "--participant-link", participantLink],
+      ["guest", "--participant-link", participantLink, "--adapter", "claude-code"],
       harness.environment,
     );
 
@@ -204,7 +156,7 @@ describe("session-helper CLI", () => {
     expect(harness.adapterNames).toEqual(["claude-code"]);
   });
 
-  test("guest mode auto-detects Codex when Codex session markers are present", async () => {
+  test("guest mode uses AGENTMEETS_SESSION_ADAPTER when configured", async () => {
     const module = await import("./cli.js").catch(() => null);
 
     expect(module).not.toBeNull();
@@ -214,7 +166,7 @@ describe("session-helper CLI", () => {
 
     const harness = createTestCliEnvironment();
     harness.environment.env = {
-      CODEX_MANAGED_BY_NPM: "1",
+      AGENTMEETS_SESSION_ADAPTER: "codex",
     };
     const participantLink = "https://agentmeets.test/j/r_9wK3mQvH8.2";
 
@@ -229,6 +181,29 @@ describe("session-helper CLI", () => {
       { mode: "guest", participantLink },
     ]);
     expect(harness.adapterNames).toEqual(["codex"]);
+  });
+
+  test("host mode fails closed when no adapter is provided", async () => {
+    const module = await import("./cli.js").catch(() => null);
+
+    expect(module).not.toBeNull();
+    if (!module) {
+      return;
+    }
+
+    const harness = createTestCliEnvironment();
+    const participantLink = "https://agentmeets.test/j/r_9wK3mQvH8.1";
+
+    const exitCode = await (module.main as any)(
+      ["host", "--participant-link", participantLink],
+      harness.environment,
+    );
+
+    expect(exitCode).toBe(1);
+    expect(harness.adapterCalls).toEqual([]);
+    expect(harness.stderr).toEqual([
+      "Missing required adapter: pass --adapter claude-code|codex or set AGENTMEETS_SESSION_ADAPTER\n",
+    ]);
   });
 
   test("help output documents both host and guest bootstrap commands", async () => {
@@ -250,40 +225,5 @@ describe("session-helper CLI", () => {
     expect(harness.stdout.join("")).toContain(
       "agentmeets-session guest --participant-link <url>",
     );
-  });
-
-  test("bootstrap mode accepts pasted invite instructions and starts the resident runtime", async () => {
-    const module = await import("./cli.js").catch(() => null);
-
-    expect(module).not.toBeNull();
-    if (!module) {
-      return;
-    }
-
-    const harness = createTestCliEnvironment();
-    const pastedText =
-      "Tell your agent to join this chat: https://agentmeets.test/j/r_9wK3mQvH8.2";
-
-    const exitCode = await (module.main as any)(
-      ["bootstrap", "--pasted-text", pastedText],
-      harness.environment,
-    );
-
-    expect(exitCode).toBe(0);
-    expect(harness.bootstrapCalls).toEqual([
-      {
-        pastedText,
-        adapterName: "claude-code",
-      },
-    ]);
-    expect(harness.runtimeCalls).toHaveLength(1);
-    expect(harness.runtimeCalls[0]).toMatchObject({
-      rootDir: "/tmp/agentmeets-runtime-root",
-      roomId: "ROOM-789",
-      role: "guest",
-      roomLabel: "Room r_9wK3mQvH8",
-      initialStatus: "waiting_for_host",
-      wsUrl: "ws://agentmeets.test/rooms/ROOM-789/ws?token=guest-session-token",
-    });
   });
 });

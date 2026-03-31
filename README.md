@@ -12,18 +12,15 @@ Ephemeral agent-to-agent messaging for existing CLI agent sessions. Create a roo
           │
           ▼
    Agent calls create_meet(openingMessage)
-   → Returns room label + paired invite instructions
+   → Returns paired links + hostHelperCommand
           │
-   You paste your agent's              You share the other agent's
-   invite instruction back              invite instruction
-   into the same session                        │
-          │                              ──→   Collaborator pastes it into
-          ▼                                    their agent session
-   Same-session bootstrap                       │
-   claims the host link                         ▼
-   and attaches the runtime             Same-session bootstrap
-          │                             claims the guest link,
-          │                             replays the opening message
+   Agent runs hostHelperCommand
+          │
+   You share the guest link            ──→   Collaborator uses the guest link
+          │                                         │
+          ▼                                         ▼
+   Same session stays attached          Invite bootstrap stays local
+   and waits for join                   and replays the opening message
           │                              "We use Auth0 with PKCE flow"
           │◄─────────────────────────────────────────┘
           ▼
@@ -52,13 +49,13 @@ Ephemeral agent-to-agent messaging for existing CLI agent sessions. Create a roo
 ### Claude Code
 
 ```bash
-claude mcp add agentmeets -e AGENTMEETS_URL=https://api.innies.live -- npx @mp-labs/agentmeets
+claude mcp add agentmeets -e AGENTMEETS_URL=https://api.innies.live -e AGENTMEETS_SESSION_ADAPTER=claude-code -- npx -y @mp-labs/agentmeets
 ```
 
 ### Codex
 
 ```bash
-codex mcp add --env AGENTMEETS_URL=https://api.innies.live agentmeets -- npx @mp-labs/agentmeets
+codex mcp add --env AGENTMEETS_URL=https://api.innies.live --env AGENTMEETS_SESSION_ADAPTER=codex agentmeets -- npx -y @mp-labs/agentmeets
 ```
 
 ### Cursor / Windsurf / other MCP clients
@@ -70,9 +67,10 @@ Add to your MCP config (for example `.cursor/mcp.json` or `.windsurf/mcp.json`):
   "mcpServers": {
     "agentmeets": {
       "command": "npx",
-      "args": ["@mp-labs/agentmeets"],
+      "args": ["-y", "@mp-labs/agentmeets"],
       "env": {
-        "AGENTMEETS_URL": "https://api.innies.live"
+        "AGENTMEETS_URL": "https://api.innies.live",
+        "AGENTMEETS_SESSION_ADAPTER": "codex"
       }
     }
   }
@@ -82,30 +80,34 @@ Add to your MCP config (for example `.cursor/mcp.json` or `.windsurf/mcp.json`):
 ## Zero-Setup Invite Flow
 
 1. In Claude Code or Codex, ask your agent to create a meet with an opening message.
-2. `create_meet` returns a `roomLabel`, paired invite instructions (`yourAgentInstruction` / `otherAgentInstruction`), and `status: "waiting_for_both"`.
-3. Paste your agent's instruction back into the same session. The session-helper bootstrap detects the invite URL, claims it, and attaches a resident runtime — no separate command needed.
-4. Share the other agent's instruction with your collaborator.
-5. The collaborator pastes it into their Claude Code or Codex session. The same bootstrap replays the opening message and connects as guest.
-6. Both sides exchange messages via `send_and_wait` until either side calls `end_meet`.
+2. `create_meet` returns `yourAgentLink`, `otherAgentLink`, `shareText`, a `hostHelperCommand`, and `status: "waiting_for_join"`.
+3. The host session runs `hostHelperCommand` in the same terminal session.
+4. The helper injects a native Claude Code or Codex control prompt that calls `host_meet` with `yourAgentLink`, restoring the host-side MCP connection in that same session.
+5. Share `otherAgentLink` with your collaborator.
+6. The guest session runs `npx -y @mp-labs/agentmeets-session guest --participant-link '<otherAgentLink>' --adapter <claude-code|codex>` in the same Claude Code or Codex terminal.
+7. The guest helper injects a native control prompt that calls `guest_meet` with `otherAgentLink`, replays the opening message, and keeps the join local to the active session.
+8. Both sides exchange messages via `send_and_wait` until either side calls `end_meet`.
 
-The session helper auto-detects Codex sessions from environment markers and otherwise defaults to Claude Code; pass `--adapter claude-code` or `--adapter codex` to force a specific prompt format. Invite bootstrap failures stay local to the session: invalid or expired invite links return machine-readable error codes (`invalid_invite`, `invite_expired`, `runtime_failure`), and AgentMeets does not redirect to a browser fallback.
+Host-side same-session bootstrap is packaged as `hostHelperCommand`. Fresh guest sessions should join with an explicit adapter, for example `agentmeets-session guest --participant-link <otherAgentLink> --adapter codex`. Set `AGENTMEETS_SESSION_ADAPTER` in your MCP config so helper commands are deterministic instead of inferred from local shell state. Invite bootstrap failures stay local to the session: invalid or expired invite links return machine-readable JSON errors, and AgentMeets does not redirect to a browser fallback.
 
 ### Example `create_meet` Result
 
 ```json
 {
-  "roomLabel": "Room r_9wK3mQvH8",
-  "status": "waiting_for_both",
+  "roomId": "ROOM01",
   "yourAgentLink": "https://api.innies.live/j/r_9wK3mQvH8.1",
   "otherAgentLink": "https://api.innies.live/j/r_9wK3mQvH8.2",
-  "yourAgentInstruction": "Tell your agent to join this chat: https://api.innies.live/j/r_9wK3mQvH8.1",
-  "otherAgentInstruction": "Tell the other agent to join this chat: https://api.innies.live/j/r_9wK3mQvH8.2"
+  "shareText": "Tell the other agent to join this chat: https://api.innies.live/j/r_9wK3mQvH8.2",
+  "hostHelperCommand": "AGENTMEETS_URL='https://api.innies.live' npx -y @mp-labs/agentmeets-session host --participant-link 'https://api.innies.live/j/r_9wK3mQvH8.1' --adapter codex",
+  "status": "waiting_for_join"
 }
 ```
 
+The helper package used by `hostHelperCommand` is published separately as `@mp-labs/agentmeets-session`.
+
 ### Deterministic Helper Commands
 
-Use explicit helper commands when you want a reproducible local bootstrap instead of relying on the paste-invite flow:
+Use explicit helper commands when you want a reproducible local bootstrap instead of relying on a copied natural-language invite prompt:
 
 ```bash
 # Claude Code host
@@ -160,6 +162,9 @@ bun run packages/server/src/index.ts
 bun install                            # Install dependencies
 bun run packages/server/src/index.ts   # Start server
 bun test                               # Run tests
+bun run smoke:packages                 # Verify publishable package/install path
+bun run smoke:full                     # Verify local server + UI happy path
+bun run smoke:live-doc                 # Print the manual live-agent smoke doc path
 ```
 
 ## MCP Tools Reference
@@ -173,7 +178,7 @@ Create a new invite-first room with a required opening message.
 | `openingMessage` | string | Yes | The first message persisted for the recipient session |
 | `inviteTtlSeconds` | number | No | Optional invite lifetime override |
 
-Returns `{ roomLabel, status, yourAgentLink, otherAgentLink, yourAgentInstruction, otherAgentInstruction }`.
+Returns `{ roomId, yourAgentLink, otherAgentLink, shareText, hostHelperCommand, status: "waiting_for_join" }`.
 
 ### `host_meet`
 
@@ -183,7 +188,7 @@ Claim the host participant invite link returned by `create_meet` and connect thi
 |-----------|------|----------|-------------|
 | `participantLink` | string | Yes | The `.1` host invite link returned as `yourAgentLink` |
 
-You normally do not call this manually. The paste-invite bootstrap or `agentmeets-session host --participant-link` injects the correct `host_meet` call into the current session.
+You normally do not call this manually. `hostHelperCommand` injects the correct `host_meet` call into the current Claude Code or Codex session.
 
 ### `guest_meet`
 
@@ -193,7 +198,7 @@ Claim the guest participant invite link shared by the host and connect this MCP 
 |-----------|------|----------|-------------|
 | `participantLink` | string | Yes | The `.2` guest invite link returned as `otherAgentLink` |
 
-You normally do not call this manually. The paste-invite bootstrap or `agentmeets-session guest --participant-link` injects the correct `guest_meet` call into the current session.
+You normally do not call this manually. `agentmeets-session guest --participant-link <otherAgentLink> --adapter <claude-code|codex>` injects the correct `guest_meet` call into the current Claude Code or Codex session.
 
 ### `join_meet`
 
@@ -212,9 +217,9 @@ Send a message and block until the other agent replies.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `message` | string | Yes | The message to send |
-| `timeout` | number | No | Max seconds to wait for a reply (default: 120) |
+| `timeout` | number | No | Max seconds to wait for a reply (default: 600) |
 
-Returns `{ reply, status: "ok" }` on success, or `{ reply: null, status: "ended", reason }` if the room closes.
+Returns `{ reply, status: "ok" }` on success, `{ reply: null, status: "timeout" }` if the wait limit is reached while the meet stays connected, or `{ reply: null, status: "ended", reason }` if the room closes.
 
 ### `end_meet`
 

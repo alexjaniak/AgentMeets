@@ -12,7 +12,7 @@ afterEach(async () => {
 });
 
 describe("createCountdown", () => {
-  test("defaults to a 5 second hold", async () => {
+  test("defaults to a 10 minute countdown", async () => {
     const module = await import("./countdown.js").catch(() => null);
 
     expect(module).not.toBeNull();
@@ -20,7 +20,7 @@ describe("createCountdown", () => {
       return;
     }
 
-    expect(module.DEFAULT_COUNTDOWN_MS).toBe(5_000);
+    expect(module.DEFAULT_COUNTDOWN_MS).toBe(600_000);
   });
 
   test("interrupts the countdown when the operator presses e", async () => {
@@ -36,7 +36,7 @@ describe("createCountdown", () => {
     const timerHandle = { id: "timer-1" };
 
     const countdown = module.createCountdown({
-      durationMs: 5_000,
+      durationMs: 120_000,
       setTimeoutFn(callback: () => void) {
         scheduledCallback = callback;
         return timerHandle;
@@ -57,7 +57,7 @@ describe("createCountdown", () => {
     expect(scheduledCallback).not.toBeNull();
   });
 
-  test("falls back after 120 seconds when there is no interruption", async () => {
+  test("falls back after 10 minutes when there is no interruption", async () => {
     const module = await import("./countdown.js").catch(() => null);
 
     expect(module).not.toBeNull();
@@ -68,7 +68,7 @@ describe("createCountdown", () => {
     let scheduledCallback: (() => void) | null = null;
 
     const countdown = module.createCountdown({
-      durationMs: 5_000,
+      durationMs: 120_000,
       setTimeoutFn(callback: () => void) {
         scheduledCallback = callback;
         return { id: "timer-2" };
@@ -81,11 +81,11 @@ describe("createCountdown", () => {
 
     await expect(countdown.result).resolves.toEqual({
       kind: "expired",
-      durationMs: 5_000,
+      durationMs: 120_000,
     });
   });
 
-  test("client stages the pending draft locally after the hold expires before activation and persists it", async () => {
+  test("client runtime enters manual draft mode after the countdown expires and persists it", async () => {
     const module = await import("./client.js").catch(() => null);
 
     expect(module).not.toBeNull();
@@ -114,39 +114,16 @@ describe("createCountdown", () => {
       },
     });
 
-    await client.processServerMessage({
-      type: "message",
-      messageId: 12,
-      sender: "host",
-      clientMessageId: "persisted:12",
-      replyToMessageId: null,
-      content: "Opening message from the room creator.",
-      createdAt: "2026-03-27 12:00:12",
-    });
-    await client.acceptDraft("First draft");
-
-    expect(client.getState()).toMatchObject({
-      status: "hold_countdown",
-      activeMessageId: 12,
-      originalDraft: "First draft",
-      workingDraft: "First draft",
-    });
+    expect(client.getState().draftMode).toBe("auto");
     expect(timerCount).toBe(1);
     expect(scheduledCallback).not.toBeNull();
 
     scheduledCallback?.();
     await client.waitForIdle();
 
-    expect(client.getState()).toMatchObject({
-      status: "draft_mode",
-      draftMode: "manual",
-      stagedBeforeActivation: true,
-      originalDraft: "First draft",
-      workingDraft: "First draft",
-    });
+    expect(client.getState().draftMode).toBe("manual");
     expect(await client.reload()).toMatchObject({
-      status: "draft_mode",
-      stagedBeforeActivation: true,
+      draftMode: "manual",
     });
 
     const rawFile = JSON.parse(
@@ -156,16 +133,11 @@ describe("createCountdown", () => {
       ),
     );
     expect(rawFile).toMatchObject({
-      status: "draft_mode",
       draftMode: "manual",
-      stagedBeforeActivation: true,
-      activeMessageId: 12,
-      originalDraft: "First draft",
-      workingDraft: "First draft",
     });
   });
 
-  test("client runtime handles e interruption and rearms the hold after auto mode resumes", async () => {
+  test("client runtime handles e interruption and rearms the countdown after auto mode resumes", async () => {
     const module = await import("./client.js").catch(() => null);
 
     expect(module).not.toBeNull();
@@ -192,17 +164,6 @@ describe("createCountdown", () => {
       },
     });
 
-    await client.processServerMessage({
-      type: "message",
-      messageId: 20,
-      sender: "host",
-      clientMessageId: "persisted:20",
-      replyToMessageId: null,
-      content: "Please send the latest summary.",
-      createdAt: "2026-03-27 12:00:20",
-    });
-    await client.acceptDraft("Initial summary.");
-
     expect(timerCount).toBe(1);
 
     await expect(client.handleKeypress("e")).resolves.toEqual([
@@ -212,12 +173,7 @@ describe("createCountdown", () => {
         reason: "interrupted",
       },
     ]);
-    expect(client.getState()).toMatchObject({
-      status: "draft_mode",
-      draftMode: "manual",
-      originalDraft: "Initial summary.",
-      workingDraft: "Initial summary.",
-    });
+    expect(client.getState().draftMode).toBe("manual");
 
     await expect(client.resumeAutoMode()).resolves.toEqual([
       {
@@ -226,12 +182,7 @@ describe("createCountdown", () => {
         reason: "manual_complete",
       },
     ]);
-    expect(client.getState()).toMatchObject({
-      status: "hold_countdown",
-      draftMode: "auto",
-      originalDraft: "Initial summary.",
-      workingDraft: "Initial summary.",
-    });
+    expect(client.getState().draftMode).toBe("auto");
     expect(timerCount).toBe(2);
   });
 });

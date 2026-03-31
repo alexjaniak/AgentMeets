@@ -2,6 +2,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import * as z from "zod/v4";
 
 const DEFAULT_SESSION_HELPER_PACKAGE = "@mp-labs/agentmeets-session";
+export type SessionAdapterName = "claude-code" | "codex";
 
 export const createMeetInputSchema = z.object({
   openingMessage: z
@@ -20,6 +21,7 @@ export interface CreateMeetHandlerOptions {
   fetchFn?: typeof fetch;
   hasActiveMeet?: () => boolean;
   sessionHelperPackageName?: string;
+  sessionAdapterName?: SessionAdapterName;
 }
 
 interface CreateMeetArgs {
@@ -33,7 +35,7 @@ interface CreateRoomResponse {
   hostAgentLink: string;
   guestAgentLink: string;
   inviteExpiresAt: string;
-  status: "waiting_for_both";
+  status: "waiting_for_join";
 }
 
 type ToolResult = CallToolResult;
@@ -42,6 +44,8 @@ export function createCreateMeetHandler({
   serverUrl,
   fetchFn = fetch,
   hasActiveMeet = () => false,
+  sessionHelperPackageName = DEFAULT_SESSION_HELPER_PACKAGE,
+  sessionAdapterName,
 }: CreateMeetHandlerOptions) {
   return async ({
     openingMessage,
@@ -79,14 +83,17 @@ export function createCreateMeetHandler({
 
     const data = (await res.json()) as CreateRoomResponse;
     return textResult({
-      roomLabel: `Room ${data.roomStem}`,
-      status: data.status,
+      roomId: data.roomId,
       yourAgentLink: data.hostAgentLink,
       otherAgentLink: data.guestAgentLink,
-      yourAgentInstruction: `Join this chat now: ${data.hostAgentLink}`,
-      sendToOtherPerson:
-        `Install the innieslive MCP server if you haven't already: npx innieslive@latest\n` +
-        `Then paste this into your agent: ${data.guestAgentLink}`,
+      shareText: `Tell the other agent to join this chat: ${data.guestAgentLink}`,
+      hostHelperCommand: buildHostHelperCommand({
+        serverUrl,
+        participantLink: data.hostAgentLink,
+        sessionHelperPackageName,
+        sessionAdapterName,
+      }),
+      status: data.status,
     });
   };
 }
@@ -95,12 +102,14 @@ export interface BuildHostHelperCommandOptions {
   serverUrl: string;
   participantLink: string;
   sessionHelperPackageName?: string;
+  sessionAdapterName?: SessionAdapterName;
 }
 
 export function buildHostHelperCommand({
   serverUrl,
   participantLink,
   sessionHelperPackageName = DEFAULT_SESSION_HELPER_PACKAGE,
+  sessionAdapterName,
 }: BuildHostHelperCommandOptions): string {
   return [
     `AGENTMEETS_URL=${quoteShellArg(serverUrl)}`,
@@ -110,6 +119,7 @@ export function buildHostHelperCommand({
     "host",
     "--participant-link",
     quoteShellArg(participantLink),
+    ...(sessionAdapterName ? ["--adapter", sessionAdapterName] : []),
   ].join(" ");
 }
 

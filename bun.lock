@@ -10,7 +10,7 @@
     },
     "packages/mcp-server": {
       "name": "@mp-labs/agentmeets",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "bin": {
         "agentmeets-mcp": "dist/index.js",
       },
@@ -40,11 +40,12 @@
     },
     "packages/session-helper": {
       "name": "@mp-labs/agentmeets-session",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "bin": {
         "agentmeets-session": "dist/cli.js",
       },
       "devDependencies": {
+        "@agentmeets/shared": "workspace:*",
         "bun-types": "latest",
         "tsup": "^8.0.0",
         "typescript": "^5.7.0",

@@ -1,6 +1,7 @@
 import { createEndPayload, createMeetState, createMessagePayload, processServerMessage } from "./client.js";
 import type { PendingReplyResult, MeetState } from "./client.js";
 import { createCreateMeetHandler } from "./tools/create-meet.js";
+import type { SessionAdapterName } from "./tools/create-meet.js";
 
 type ToolResult = {
   content: Array<{ type: "text"; text: string }>;
@@ -8,6 +9,10 @@ type ToolResult = {
 };
 
 type Sender = "host" | "guest";
+
+interface JoinMeetResponse {
+  guestToken: string;
+}
 
 interface ClaimInviteResponse {
   roomId: string;
@@ -33,15 +38,15 @@ export interface CreateMeetControllerOptions {
   webSocketFactory?: (url: string) => WebSocketLike;
   settleDelayMs?: number;
   sleepFn?: (ms: number) => Promise<void>;
+  sessionAdapterName?: SessionAdapterName;
 }
 
 export interface MeetController {
   createMeet: ReturnType<typeof createCreateMeetHandler>;
   hostMeet(input: { participantLink: string }): Promise<ToolResult>;
   guestMeet(input: { participantLink: string }): Promise<ToolResult>;
-  sendAndWait(input: { message: string; timeout?: number }): Promise<ToolResult>;
-  confirmSend(input: { draftId?: string; timeout?: number }): Promise<ToolResult>;
-  reviseDraft(input: { draftId: string; revisedMessage: string }): Promise<ToolResult>;
+  joinMeet(input: { roomId: string }): Promise<ToolResult>;
+  sendAndWait(input: { message: string; timeout: number }): Promise<ToolResult>;
   endMeet(): Promise<ToolResult>;
   getMeetState(): MeetState | null;
 }
@@ -58,6 +63,7 @@ export function createMeetController({
   webSocketFactory = (url) => new WebSocket(url),
   settleDelayMs = DEFAULT_SETTLE_DELAY_MS,
   sleepFn = defaultSleep,
+  sessionAdapterName,
 }: CreateMeetControllerOptions): MeetController {
   let meetState: MeetState | null = null;
 
@@ -65,17 +71,19 @@ export function createMeetController({
     serverUrl,
     fetchFn,
     hasActiveMeet: () => meetState !== null,
+    sessionAdapterName,
   });
 
   return {
     createMeet,
     hostMeet,
     guestMeet,
+    joinMeet,
     sendAndWait,
-    confirmSend,
-    reviseDraft,
     endMeet,
-    getMeetState: () => meetState,
+    getMeetState() {
+      return meetState;
+    },
   };
 
   async function hostMeet({
@@ -146,127 +154,105 @@ export function createMeetController({
     });
   }
 
-  async function sendAndWait(input: { message: string; timeout?: number }): Promise<ToolResult> {
-    const activeMeet = meetState;
-    if (!activeMeet) {
-      return errorResult("No active meet session");
+  async function joinMeet({
+    roomId,
+  }: {
+    roomId: string;
+  }): Promise<ToolResult> {
+    if (meetState) {
+      return errorResult("A meet is already active. Call end_meet first.");
     }
 
-    const draftId = crypto.randomUUID();
-    activeMeet.stagedDraft = {
-      id: draftId,
-      message: input.message,
-      originalDraft: input.message,
-    };
+    let res: Response;
+    try {
+      res = await fetchFn(`${serverUrl}/rooms/${roomId}/join`, {
+        method: "POST",
+      });
+    } catch (err) {
+      return errorResult(`Cannot reach server at ${serverUrl}: ${err}`);
+    }
 
-    return textResult({
-      status: "staged",
-      draftId,
-      message: input.message,
-      originalDraft: input.message,
-      holdSeconds: 5,
-      instruction:
-        "Reply will auto-send in 5s. Tell your agent to edit it, or say 'send it' to send now.",
+    if (!res.ok) {
+      const statusErrors: Record<number, string> = {
+        404: "Room not found",
+        409: "Room is full",
+        410: "Room has expired",
+      };
+      return errorResult(
+        statusErrors[res.status] ?? `Server error: ${res.status}`,
+      );
+    }
+
+    const { guestToken } = (await res.json()) as JoinMeetResponse;
+    return connectMeet({
+      activeServerUrl: serverUrl,
+      roomId,
+      token: guestToken,
+      role: "guest",
     });
   }
 
-  async function confirmSend(input: { draftId?: string; timeout?: number }): Promise<ToolResult> {
-    const activeMeet = meetState;
-    if (!activeMeet) {
-      return errorResult("No active meet session");
+  async function sendAndWait({
+    message,
+    timeout,
+  }: {
+    message: string;
+    timeout: number;
+  }): Promise<ToolResult> {
+    if (!meetState) {
+      return errorResult(
+        "No active meet. Call create_meet, host_meet, guest_meet, or join_meet first.",
+      );
     }
 
-    const ws = activeMeet.ws;
-    if (!ws || ws.readyState !== 1) {
+    if (!meetState.ws || meetState.ws.readyState !== WebSocket.OPEN) {
       clearState();
-      return errorResult("WebSocket not connected");
+      return errorResult("Connection lost");
     }
 
-    const timeout = input.timeout ?? 120;
-
-    // Listen-only mode: no draftId means just wait for inbound message
-    const listenOnly = !input.draftId;
-
-    if (!listenOnly) {
-      if (!activeMeet.stagedDraft) {
-        return errorResult("No staged draft to send");
-      }
-
-      if (activeMeet.stagedDraft.id !== input.draftId) {
-        return errorResult("Draft ID mismatch — the draft may have been replaced");
-      }
-    }
-
-    // Extract and clear draft before sending (if not listen-only)
-    let message: string | null = null;
-    if (!listenOnly && activeMeet.stagedDraft) {
-      message = activeMeet.stagedDraft.message;
-      activeMeet.stagedDraft = null;
-    }
+    const activeMeet = meetState;
+    const payload = createMessagePayload(activeMeet, message);
 
     const result = await new Promise<PendingReplyResult>((resolve) => {
-      const finish = (r: PendingReplyResult) => {
-        clearTimeout(timer);
-        activeMeet.pendingReply = null;
-        resolve(r);
-      };
-
+      const finish = (value: PendingReplyResult) => resolve(value);
       activeMeet.pendingReply = { resolve: finish };
 
-      const timer = setTimeout(
-        () => finish({ content: null, reason: "timeout" }),
-        timeout * 1000,
-      );
-
-      if (message !== null) {
-        const payload = createMessagePayload(activeMeet, message);
-        try {
-          ws.send(JSON.stringify(payload));
-        } catch {
-          finish({ content: null, reason: "disconnected" });
+      const timer = setTimeout(() => {
+        if (activeMeet.pendingReply?.resolve === finish) {
+          activeMeet.pendingReply = null;
+          finish({ content: null, reason: "timeout" });
         }
+      }, timeout * 1_000);
+
+      try {
+        activeMeet.ws!.send(JSON.stringify(payload));
+      } catch {
+        clearTimeout(timer);
+        if (activeMeet.pendingReply?.resolve === finish) {
+          activeMeet.pendingReply = null;
+        }
+        finish({ content: null, reason: "disconnected" });
       }
     });
 
     if (result.error) {
       return errorResult(
-        `Protocol error (${result.error.code}): ${result.error.message}`,
+        `WebSocket protocol error (${result.error.code}): ${result.error.message}`,
       );
     }
 
     if (result.content !== null) {
-      return textResult({ reply: result.content, status: "ok", queuedMessages: [] });
+      return textResult({ reply: result.content, status: "ok" });
     }
 
-    const reason = result.reason ?? "unknown";
-    if (reason === "timeout" || reason === "disconnected") {
-      clearState();
+    if (result.reason === "timeout") {
+      return textResult({ reply: null, status: "timeout" });
     }
+
+    const reason =
+      result.reason ?? (meetState === null ? "disconnected" : "timeout");
+    clearState();
     return textResult({ reply: null, status: "ended", reason });
-  }
-
-  async function reviseDraft(input: { draftId: string; revisedMessage: string }): Promise<ToolResult> {
-    const activeMeet = meetState;
-    if (!activeMeet) {
-      return errorResult("No active meet session");
-    }
-
-    if (!activeMeet.stagedDraft) {
-      return errorResult("No staged draft to revise");
-    }
-
-    if (activeMeet.stagedDraft.id !== input.draftId) {
-      return errorResult("Draft ID mismatch — the draft may have been replaced");
-    }
-
-    activeMeet.stagedDraft.message = input.revisedMessage;
-
-    return textResult({
-      status: "staged",
-      draftId: activeMeet.stagedDraft.id,
-      message: input.revisedMessage,
-      originalDraft: activeMeet.stagedDraft.originalDraft,
-    });
   }
 
   async function endMeet(): Promise<ToolResult> {
