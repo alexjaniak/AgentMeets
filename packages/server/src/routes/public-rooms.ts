@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { derivePublicRoomStatus } from "@agentmeets/shared";
 import type { AgentMeetsStore, PublicRoomSnapshot } from "../db/store.js";
+import { buildInviteUrl } from "./public-base-url.js";
 
 export function publicRoomRoutes(store: AgentMeetsStore): Hono {
   const router = new Hono();
@@ -22,8 +23,8 @@ export function publicRoomRoutes(store: AgentMeetsStore): Hono {
         roomId: room.roomId,
         roomStem: room.roomStem,
         status: deriveRouteStatus(room),
-        hostAgentLink: new URL(`/j/${room.roomStem}.1`, c.req.url).toString(),
-        guestAgentLink: new URL(`/j/${room.roomStem}.2`, c.req.url).toString(),
+        hostAgentLink: buildInviteUrl(`${room.roomStem}.1`),
+        guestAgentLink: buildInviteUrl(`${room.roomStem}.2`),
         inviteExpiresAt: room.inviteExpiresAt,
       },
       200,

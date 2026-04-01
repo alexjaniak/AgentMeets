@@ -4,6 +4,7 @@ import {
   type AgentMeetsStore,
   InviteError,
 } from "../db/store.js";
+import { buildInviteUrl } from "./public-base-url.js";
 
 const BRAND_ASSET_BASE_URL = "https://innies.live";
 
@@ -20,7 +21,7 @@ export function inviteRoutes(store: AgentMeetsStore): Hono {
       if (acceptsHtml(c.req.header("accept"))) {
         return c.html(
           renderInviteLanding({
-            inviteUrl: c.req.url,
+            inviteUrl: buildInviteUrl(inviteToken),
             role: parsedToken.role,
             roomLabel: `Room ${parsedToken.roomStem}`,
             status: manifest.status,

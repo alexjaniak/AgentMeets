@@ -1,15 +1,25 @@
-import { describe, test, expect, beforeEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Hono } from "hono";
 import { createFakeAgentMeetsStore, type AgentMeetsStore } from "../db/index.js";
 import { inviteRoutes } from "./invites.js";
 
 let store: AgentMeetsStore;
 let app: Hono;
+const originalPublicUrl = process.env.PUBLIC_URL;
 
 beforeEach(() => {
   store = createFakeAgentMeetsStore();
   app = new Hono();
   app.route("/", inviteRoutes(store));
+});
+
+afterEach(() => {
+  if (originalPublicUrl === undefined) {
+    delete process.env.PUBLIC_URL;
+    return;
+  }
+
+  process.env.PUBLIC_URL = originalPublicUrl;
 });
 
 describe("GET /j/:inviteToken", () => {
@@ -95,6 +105,27 @@ describe("GET /j/:inviteToken", () => {
     expect(html).toContain('rel="icon" href="https://innies.live/favicon.ico"');
     expect(html).toContain('rel="manifest" href="https://innies.live/site.webmanifest"');
     expect(html).toContain("Paste this invite into an existing Claude Code or Codex session");
+  });
+
+  test("uses PUBLIC_URL instead of the internal request origin in html invite instructions", async () => {
+    process.env.PUBLIC_URL = "https://api.innies.live/";
+
+    await store.createRoom({
+      id: "ABC123",
+      hostToken: "host-token",
+      openingMessage: "Opening hello",
+      roomStem: "r_9wK3mQvH8",
+    });
+    await store.createInvite("ABC123", "r_9wK3mQvH8.2", "2099-03-24 12:05:00");
+
+    const res = await app.request("http://127.0.0.1:4030/j/r_9wK3mQvH8.2", {
+      headers: { accept: "text/html" },
+    });
+
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("Tell the other agent to join this chat: https://api.innies.live/j/r_9wK3mQvH8.2");
+    expect(html).not.toContain("http://127.0.0.1:4030/j/r_9wK3mQvH8.2");
   });
 });
 

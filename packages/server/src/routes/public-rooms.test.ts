@@ -1,15 +1,25 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Hono } from "hono";
 import { createFakeAgentMeetsStore, type AgentMeetsStore } from "../db/index.js";
 import { publicRoomRoutes } from "./public-rooms.js";
 
 let store: AgentMeetsStore;
 let app: Hono;
+const originalPublicUrl = process.env.PUBLIC_URL;
 
 beforeEach(() => {
   store = createFakeAgentMeetsStore();
   app = new Hono();
   app.route("/", publicRoomRoutes(store));
+});
+
+afterEach(() => {
+  if (originalPublicUrl === undefined) {
+    delete process.env.PUBLIC_URL;
+    return;
+  }
+
+  process.env.PUBLIC_URL = originalPublicUrl;
 });
 
 describe("GET /public/rooms/:roomStem", () => {
@@ -95,6 +105,31 @@ describe("GET /public/rooms/:roomStem", () => {
       status: "ended",
       hostAgentLink: expect.stringMatching(/\/j\/r_9wK3mQvH8\.1$/),
       guestAgentLink: expect.stringMatching(/\/j\/r_9wK3mQvH8\.2$/),
+      inviteExpiresAt: "2099-03-24 12:05:00",
+    });
+  });
+
+  test("uses PUBLIC_URL instead of the internal request origin for invite links", async () => {
+    process.env.PUBLIC_URL = "https://api.innies.live/";
+
+    await store.createRoom({
+      id: "ROOM01",
+      hostToken: "host-token-123",
+      openingMessage: "Can you inspect auth?",
+      roomStem: "r_9wK3mQvH8",
+    });
+    await store.createInvite("ROOM01", "r_9wK3mQvH8.1", "2099-03-24 12:05:00");
+    await store.createInvite("ROOM01", "r_9wK3mQvH8.2", "2099-03-24 12:05:00");
+
+    const res = await app.request("http://127.0.0.1:4030/public/rooms/r_9wK3mQvH8");
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      roomId: "ROOM01",
+      roomStem: "r_9wK3mQvH8",
+      status: "waiting_for_both",
+      hostAgentLink: "https://api.innies.live/j/r_9wK3mQvH8.1",
+      guestAgentLink: "https://api.innies.live/j/r_9wK3mQvH8.2",
       inviteExpiresAt: "2099-03-24 12:05:00",
     });
   });

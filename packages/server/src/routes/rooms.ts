@@ -3,11 +3,10 @@ import { customAlphabet } from "nanoid";
 import type { AgentMeetsStore } from "../db/store.js";
 import { generateRoomId, generateToken } from "../db/tokens.js";
 import { rateLimiter } from "../middleware/rate-limit.js";
+import { buildInviteUrl } from "./public-base-url.js";
 
 const ROOM_ID_PATTERN = /^[A-Z0-9]{6}$/;
 const MAX_COLLISION_RETRIES = 3;
-const PUBLIC_BASE_URL =
-  process.env.PUBLIC_URL?.replace(/\/$/, "") ?? "https://api.innies.live";
 const DEFAULT_INVITE_TTL_MS = 10 * 60 * 1000;
 
 export function roomRoutes(store: AgentMeetsStore): Hono {
@@ -58,8 +57,8 @@ export function roomRoutes(store: AgentMeetsStore): Hono {
           {
             roomId,
             roomStem,
-            hostAgentLink: `${PUBLIC_BASE_URL}/j/${roomStem}.1`,
-            guestAgentLink: `${PUBLIC_BASE_URL}/j/${roomStem}.2`,
+            hostAgentLink: buildInviteUrl(`${roomStem}.1`),
+            guestAgentLink: buildInviteUrl(`${roomStem}.2`),
             inviteExpiresAt,
             status: "waiting_for_join",
           },
